@@ -1,0 +1,144 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.example.chatterserver.mapper.GroupMapper">
+
+    <resultMap id="GroupInfoResultMap" type="com.example.chatterserver.model.GroupInfo">
+        <id property="groupId" column="group_id"/>
+        <result property="groupName" column="group_name"/>
+        <result property="creatorId" column="creator_id"/>
+        <result property="createdAt" column="created_at" typeHandler="com.example.chatterserver.mapper.typehandler.LocalDateTimeTypeHandler"/>
+    </resultMap>
+
+    <resultMap id="UserResultMap" type="com.example.chatterserver.model.User">
+        <id property="userId" column="user_id"/>
+        <result property="username" column="username"/>
+        <result property="password" column="password"/>
+        <result property="nickname" column="nickname"/>
+        <result property="avatarUrl" column="avatar_url"/>
+        <result property="status" column="status"/>
+        <result property="lastHeartbeat" column="last_heartbeat" typeHandler="com.example.chatterserver.mapper.typehandler.LocalDateTimeTypeHandler"/>
+        <result property="createdAt" column="created_at" typeHandler="com.example.chatterserver.mapper.typehandler.LocalDateTimeTypeHandler"/>
+        <result property="lastLoginAt" column="last_login" typeHandler="com.example.chatterserver.mapper.typehandler.LocalDateTimeTypeHandler"/>
+        </resultMap>
+
+    <resultMap id="MessageResultMap" type="com.example.chatterserver.model.Message">
+        <id property="messageId" column="message_id"/>
+        <result property="senderId" column="sender_id"/>
+        <result property="receiverId" column="receiver_id"/>
+        <result property="groupId" column="group_id"/>
+        <result property="messageType" column="message_type"/>
+        <result property="content" column="content"/>
+        <result property="status" column="status"/>
+        <result property="createdAt" column="created_at" typeHandler="com.example.chatterserver.mapper.typehandler.LocalDateTimeTypeHandler"/>
+    </resultMap>
+
+
+    <select id="getGroupInfoByGroupId" resultMap="GroupInfoResultMap">
+        SELECT group_id, group_name, creator_id, created_at
+        FROM groups
+        WHERE group_id = #{groupId}
+    </select>
+
+    <select id="getGroupInfoByManagerId" resultMap="GroupInfoResultMap">
+        SELECT group_id, group_name, creator_id, created_at
+        FROM groups
+        WHERE group_id = #{userId}
+    </select>
+
+    <select id="getGroupsByUserId" resultMap="GroupInfoResultMap">
+        SELECT DISTINCT
+            g.group_id,
+            g.group_name,
+            g.creator_id,
+            g.created_at
+        FROM
+            groups g
+        JOIN
+            group_members gm ON g.group_id = gm.group_id
+        WHERE
+            gm.user_id = #{userId}
+    </select>
+   
+    <insert id="insertGroup" useGeneratedKeys="true" keyProperty="groupId">
+        INSERT INTO groups (group_name, creator_id, created_at)
+        VALUES (#{groupName}, #{creatorId}, #{createdAt,typeHandler=com.example.chatterserver.mapper.typehandler.LocalDateTimeTypeHandler})
+    </insert>
+
+    <insert id="addCreatorToGroup">
+        INSERT INTO group_members (group_id, user_id, role, joined_at)
+        VALUES (#{groupId}, #{creatorId}, 2, #{joinedAt,typeHandler=com.example.chatterserver.mapper.typehandler.LocalDateTimeTypeHandler}) </insert>
+
+    <delete id="deleteGroup">
+        DELETE FROM groups
+        WHERE group_id = #{groupId}
+    </delete>
+
+    <delete id="deleteAllGroupMembers">
+        DELETE FROM group_members
+        WHERE group_id = #{groupId}
+    </delete>
+
+    <insert id="addUserToGroup">
+        INSERT INTO group_members (group_id, user_id, role, joined_at)
+        VALUES (#{groupId}, #{userId}, #{role}, #{joinedAt,typeHandler=com.example.chatterserver.mapper.typehandler.LocalDateTimeTypeHandler})
+    </insert>
+
+    <delete id="removeUserFromGroup">
+        DELETE FROM group_members
+        WHERE group_id = #{groupId} AND user_id = #{userId}
+    </delete>
+
+    <select id="getAllUsersFromGroup" resultMap="UserResultMap">
+        SELECT
+            u.user_id, u.username, u.password, u.nickname, u.avatar_url,
+            u.status, u.last_heartbeat, u.created_at, u.last_login
+        FROM
+            users u
+        JOIN
+            group_members gm ON u.user_id = gm.user_id
+        WHERE
+            gm.group_id = #{groupId}
+    </select>
+
+    <select id="getAllMessagesFromGroup" resultMap="MessageResultMap">
+        SELECT
+            message_id, sender_id, receiver_id, group_id, message_type,
+            content, status, created_at
+        FROM
+            messages
+        WHERE
+            group_id = #{groupId}
+        ORDER BY
+            created_at ASC
+    </select>
+
+    <select id="getAllGroupsMessageByUserId" resultMap="MessageResultMap">
+        SELECT
+            m.message_id, m.sender_id, m.receiver_id, m.group_id, m.message_type,
+            m.content, m.status, m.created_at
+        FROM
+            messages m
+        JOIN group_members gm ON gm.group_id = m.group_id
+        WHERE
+            gm.user_id = #{userId}
+        ORDER BY
+            created_at ASC
+    </select>
+
+    <select id="isUserInGroup" resultType="int">
+        SELECT COUNT(*)
+        FROM group_members
+        WHERE group_id = #{groupId} AND user_id = #{userId}
+    </select>
+
+    
+    <select id="getRelatedGroupsByUserId" resultMap="GroupInfoResultMap">
+        SELECT g.group_id, g.group_name, g.creator_id, g.created_at
+        FROM groups g
+        JOIN group_members gm 
+        ON gm.group_id = g.group_id
+        WHERE gm.user_id = #{userId}
+    </select>
+</mapper>

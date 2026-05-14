@@ -1,0 +1,15 @@
+clear
+cd C:\code_in_laptop\chatter2\client\
+
+cd build 
+
+cmake .. -G "MinGW Makefiles" `
+  -DCMAKE_C_COMPILER=C:/Qt/Tools/mingw1120_64/bin/gcc.exe `
+  -DCMAKE_CXX_COMPILER=C:/Qt/Tools/mingw1120_64/bin/g++.exe `
+  -DCMAKE_PREFIX_PATH=C:/Qt/6.5.3/mingw_64 `
+  -DCMAKE_BUILD_TYPE=Debug `
+  -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+
+mingw32-make -j 
+
+.\chatter_client.exe

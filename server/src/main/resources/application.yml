@@ -1,0 +1,54 @@
+server:
+  port: 8080
+file:
+  upload-dir: /home/elaine/chatter2/server/upload_files
+
+spring:
+  datasource:
+    driver-class-name: org.sqlite.JDBC
+    url: jdbc:sqlite:chatter.db
+    username:
+    password:
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 5
+      idle-timeout: 300000
+      connection-timeout: 20000
+  sql:
+    init:
+      mode: always
+      schema-locations: classpath:schema.sql
+      data-locations: classpath*:data.sql
+      continue-on-error: true
+  main:
+    allow-bean-definition-overriding: false
+  servlet:
+    multipart:
+    max-file-size: 50MB
+    max-request-size: 200MB
+
+jwt:
+  secret: your-very-secret-key-should-be-at-least-32-bytes-long
+  expiration: 86400000
+
+chat:
+  server:
+    port: 9999
+  lobby:
+    name: "chat_lobby"
+    max-users: 1000
+    history-size: 100
+    heartbeat-interval: 30000
+    heartbeat-timeout: 90000
+
+logging:
+  level:
+    com.example.chatterserver: DEBUG
+    org.springframework.web: INFO
+    org.springframework.jdbc: DEBUG
+
+mybatis:
+  mapper-locations: classpath:mapper/*.xml
+  type-aliases-package: com.example.chatterserver.model
+  configuration:
+    map-underscore-to-camel-case: true
