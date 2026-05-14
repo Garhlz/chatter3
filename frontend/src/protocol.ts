@@ -63,3 +63,21 @@ export type RealtimeErrorPayload = {
   code: string;
   message: string;
 };
+
+export type SessionReadyPayload = {
+  user: CurrentUser;
+  heartbeatTimeout: string;
+};
+
+export type PresencePayload = {
+  user: OnlineUser;
+};
+
+export type PublicSendPayload = {
+  content: string;
+};
+
+export type PrivateSendPayload = {
+  receiverUsername: string;
+  content: string;
+};
