@@ -6,6 +6,8 @@ import (
 	"os"
 	"strconv"
 	"time"
+
+	"github.com/joho/godotenv"
 )
 
 // Config 是应用全局配置，由环境变量或默认值填充。
@@ -32,6 +34,15 @@ type Config struct {
 // Load 从环境变量读取配置，缺失时使用默认值。
 // 强制要求的字段（DatabaseURL、JWTSecret）若未设置则返回错误。
 func Load() (*Config, error) {
+	// 后端开发默认从 backend-go/.env 读取本地变量。
+	// 这样做的目的不是绕开真实环境变量，而是给本地开发一个稳定入口：
+	// - `.env` 适合本地开发机
+	// - CI / 生产环境仍然可以直接注入真实环境变量
+	// - 已存在的环境变量仍会覆盖 `.env` 中的值
+	if err := godotenv.Load(); err != nil && !os.IsNotExist(err) {
+		return nil, fmt.Errorf("加载 .env 失败: %w", err)
+	}
+
 	cfg := &Config{
 		TCPPort:          intEnv("TCP_PORT", 9999),
 		HTTPPort:         intEnv("HTTP_PORT", 8080),

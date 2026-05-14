@@ -15,6 +15,8 @@
   - 后端 `v2` 接口可以逐步联调
   - 桌面壳可在 Windows 本地进行早期验证
   - 代码结构从现在起避免明显的 Linux-only 假设
+  - 前后端默认都使用系统原生工具链
+  - PostgreSQL 本地开发默认通过 Docker 启动
 
 ---
 
@@ -38,11 +40,7 @@
 - [x] 新前端骨架：`frontend/`
 - [x] Web UI 脚手架：`React + Vite`
 - [x] 桌面壳脚手架：`Tauri v2`
-- [x] 根 `flake.nix` 已拆成多 shell：
-  - [x] `backend`
-  - [x] `frontend`
-  - [x] `full`
-  - [x] `legacy-client`
+- [x] 已移除项目内 Nix / direnv 入口
 - [x] 协作规范文档：`AGENT.MD`
 
 ### 已验证
@@ -51,13 +49,12 @@
 - [x] `npm run typecheck`
 - [x] `npm run build`
 - [x] `cargo check --manifest-path frontend/src-tauri/Cargo.toml`
-- [x] `nix flake show .`
 
 ### 尚未完成
 
 - [x] 后端真实 `v2` 认证实现
 - [x] 后端历史消息查询实现
-- [ ] 后端 WebSocket 实时事件实现
+- [x] 后端 WebSocket 实时事件实现
 - [x] 前端与后端真实联调（HTTP 登录 / 注册 / 历史）
 - [ ] 文件上传下载打通
 - [ ] 群聊路线决策与实现
@@ -66,6 +63,9 @@
 
 - `P2` 已完成：HTTP 认证与初始历史同步已经形成闭环
 - 当前阶段为 `P3`：把“真实在线状态 + WebSocket 实时事件”接通
+- 执行层 TODO 已拆分为：
+  - `frontend/TODO.md`
+  - `backend-go/TODO.md`
 - 当前最大的结构风险不是功能缺失，而是：
   - `P2/P3` 的职责边界容易再次混回去
   - 容易把“历史拉取”和“实时事件”混在同一层
@@ -111,8 +111,8 @@
 - [x] 建立 `Tauri v2` Rust 桌面壳
 - [x] 建立 Tauri capability 配置与可用图标
 - [x] 建立根 `.gitignore`
-- [x] 将根 `flake.nix` 改为多 shell 结构
-- [x] 修正 Nix shell 可解析性问题
+- [x] 前后端都已切回系统原生工具链
+- [x] 后端数据库切换为 Docker 本地开发流程
 
 ### 当前开发约束
 
@@ -127,7 +127,7 @@
 ### 产出
 
 - 新前端工程已可单独演进
-- Nix 环境已不再绑定旧 Qt 主线
+- 本地开发不再依赖 Nix / direnv
 - 后续可以开始做真实业务联调
 
 ### 这一阶段留下的约束
@@ -186,109 +186,24 @@
 
 ---
 
-## P3：接通 WebSocket 实时事件 ← 当前阶段
+## 执行导航
 
-当认证与初始同步跑通后，再接通实时能力与真实在线状态。
+- 前端执行线：见 [frontend/TODO.md](/home/elaine/work/projects/chatter3/frontend/TODO.md)
+- 后端执行线：见 [backend-go/TODO.md](/home/elaine/work/projects/chatter3/backend-go/TODO.md)
 
-### 当前目标
-
-把“登录后可看历史”推进到“登录后进入真实在线会话”。  
-这个阶段一旦完成，前端才能真正拥有：
-
-- 可靠的连接状态
-- 真实的在线用户语义
-- 实时消息追加能力
-- 后续文件/群聊/通知的承载通道
-
-### TODO：后端
-
-- [ ] 实现 `GET /api/v2/ws` 握手鉴权
-- [ ] 实现 `GET /api/v2/users/online` 的真实在线语义
-- [ ] 实现 `session.ping` / `session.pong`
-- [ ] 实现匿名连接到认证会话的转换
-- [ ] 实现 `connection -> session`
-- [ ] 实现 `username -> session`
-- [ ] 实现 `userId -> session`
-- [ ] 在线状态以内存会话管理器为准
-- [ ] 清理逻辑保持幂等
-- [ ] 实现统一错误事件 `error`
-- [ ] 实现 `presence.online` / `presence.offline`
-- [ ] 实现 `chat.public.message`
-- [ ] 实现 `chat.private.message`
-
-### TODO：前端
-
-- [ ] 前端接入连接状态、重连、错误处理
-- [ ] 登录成功后建立 WebSocket，而不是停在 HTTP-only 模式
-- [ ] 将实时消息追加到当前消息列表
-- [ ] 将 presence 事件映射为在线用户列表
-- [ ] 把“未连接 / 连接中 / 已连接 / 出错”状态显示得更明确
-
-### 分阶段落地建议
-
-1. 先做 `ws` 握手 + `ping/pong`
-2. 再做 `presence.online/offline`
-3. 然后接 `chat.public.message`
-4. 最后接 `chat.private.message`
-
-### 产出
-
-- 前端可展示真实连接状态
-- 实时消息可以追加到 UI
-- 在线状态变化可以被前端消费
+这份根文档继续保留项目总路线、阶段背景和共享事项；具体执行请优先看对应子目录中的 TODO。
 
 ---
 
-## P4：公共聊天闭环
+## Shared Later
 
-P3 完成后，这一阶段的重点不再是“能不能收消息”，而是“能不能由前端真正发出消息并形成广播闭环”。
+前后端都不应在当前两个执行会话里抢着做的共享事项：
 
-### TODO
+- [ ] 为前端补一份基于 `protocol-v2` 的联调样本
+- [ ] 决定群聊进入 `v2.1` 还是单独 `v3`
+- [ ] 文件传输最终体验与协议细节收敛
 
-- [ ] 实现公共聊天发送
-- [ ] 实现公共聊天持久化
-- [ ] 实现公共聊天广播
-- [ ] 消息结构与历史接口保持一致
-- [ ] 增加消息大小限制与基础格式校验
-
-### 产出
-
-- 公共聊天可以发送、落库、广播、回放
-
----
-
-## P5：私聊闭环
-
-私聊放在公共聊天之后，是因为它需要更稳定的在线会话路由与错误语义。
-
-### TODO
-
-- [ ] 实现私聊发送
-- [ ] 实现私聊持久化
-- [ ] 实现在线用户实时投递
-- [ ] 实现离线历史回放
-- [ ] 校验接收方存在性
-
-### 产出
-
-- 私聊可以完整收发
-- 离线后重新登录可恢复历史
-
----
-
-## P6：文件传输
-
-文件传输继续保持“聊天元数据走协议、文件内容走 HTTP”的策略，不把大文件塞进 WebSocket。
-
-### TODO
-
-- [ ] 实现 `POST /api/v2/files/upload`
-- [ ] 实现 `GET /api/v2/files/{fileId}`
-- [ ] 实现文件元数据持久化
-- [ ] 让文件消息结构与 `protocol-v2` 对齐
-- [ ] 前端接入文件选择、上传、下载与错误反馈
-
-### 产出
+### Shared 产出
 
 - 新前端可以上传下载文件
 - 文件消息不再依赖旧 Qt 协议的历史包袱

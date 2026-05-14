@@ -27,6 +27,12 @@ type PublicMessage struct {
 	Nickname    string
 }
 
+// MessageInsert captures the minimal DB-generated fields needed after inserting a message.
+type MessageInsert struct {
+	MessageID int64
+	CreatedAt time.Time
+}
+
 // PrivateMessage 是私聊消息的查询结果行，包含收发双方的用户信息。
 type PrivateMessage struct {
 	MessageID        int64
@@ -131,25 +137,25 @@ func (r *MessageRepository) GetPrivateHistory(ctx context.Context, userID1, user
 
 // InsertPublicMessage 插入大厅消息，messageType: 0=text, 1=file。
 // 大厅消息的 scope 由 receiver_id=NULL AND group_id=NULL 隐含。
-func (r *MessageRepository) InsertPublicMessage(ctx context.Context, senderID int64, messageType int16, content string) (int64, error) {
-	var id int64
+func (r *MessageRepository) InsertPublicMessage(ctx context.Context, senderID int64, messageType int16, content string) (*MessageInsert, error) {
+	var row MessageInsert
 	if err := r.pool.QueryRow(ctx,
-		`INSERT INTO messages (sender_id, message_type, content) VALUES ($1, $2, $3) RETURNING message_id`,
+		`INSERT INTO messages (sender_id, message_type, content) VALUES ($1, $2, $3) RETURNING message_id, created_at`,
 		senderID, messageType, content,
-	).Scan(&id); err != nil {
-		return 0, fmt.Errorf("InsertPublicMessage: %w", err)
+	).Scan(&row.MessageID, &row.CreatedAt); err != nil {
+		return nil, fmt.Errorf("InsertPublicMessage: %w", err)
 	}
-	return id, nil
+	return &row, nil
 }
 
 // InsertPrivateMessage 插入私聊消息。
-func (r *MessageRepository) InsertPrivateMessage(ctx context.Context, senderID, receiverID int64, messageType int16, content string) (int64, error) {
-	var id int64
+func (r *MessageRepository) InsertPrivateMessage(ctx context.Context, senderID, receiverID int64, messageType int16, content string) (*MessageInsert, error) {
+	var row MessageInsert
 	if err := r.pool.QueryRow(ctx,
-		`INSERT INTO messages (sender_id, receiver_id, message_type, content) VALUES ($1, $2, $3, $4) RETURNING message_id`,
+		`INSERT INTO messages (sender_id, receiver_id, message_type, content) VALUES ($1, $2, $3, $4) RETURNING message_id, created_at`,
 		senderID, receiverID, messageType, content,
-	).Scan(&id); err != nil {
-		return 0, fmt.Errorf("InsertPrivateMessage: %w", err)
+	).Scan(&row.MessageID, &row.CreatedAt); err != nil {
+		return nil, fmt.Errorf("InsertPrivateMessage: %w", err)
 	}
-	return id, nil
+	return &row, nil
 }

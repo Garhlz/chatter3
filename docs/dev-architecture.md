@@ -19,6 +19,26 @@
 - 调用 HTTP 接口
 - 管理 WebSocket 连接
 
+当前已落地：
+
+- 登录 / 注册 / 历史拉取的 HTTP 路径
+- 远程开发下通过 `Vite proxy` 访问后端
+- `realtime client`
+- 基于 `Soft Desktop` 的桌面客户端主界面重构
+- 公共消息 / 私聊消息的基础发送 UI
+
+当前仍待落地：
+
+- 更稳定的重连策略
+- 更完整的在线用户 / 会话状态层
+- 发送中的 loading / retry / fail 反馈
+- 是否正式迁到统一状态层（如 `zustand`）
+
+更新：
+
+- 登录成功后的 WebSocket 建连与基础事件消费已经接上
+- 当前更大的未完成项已经转为：重连策略、消息发送 UI、以及更成熟的状态层整理
+
 不负责：
 
 - 桌面文件系统细节
@@ -103,6 +123,19 @@
 - 前端能收到实时事件
 - 在线状态不再是假象
 
+当前后端已经落地的部分：
+
+- `GET /api/v2/ws?token=...` 握手鉴权
+- `session.ready`
+- `session.ping` / `session.pong`
+- `presence.online` / `presence.offline`
+- 基于心跳超时的失活清理
+- `chat.public.send -> chat.public.message`
+- `chat.private.send -> chat.private.message`
+
+所以当前 `P3` 的主要阻塞点，已经不再是“后端有没有实时入口”，
+而是“前端是否把这些实时事件真正消费起来”。
+
 这一阶段必须单独拆开的原因是：
 
 - HTTP 拉历史和 WebSocket 收实时是两种完全不同的状态模型
@@ -116,7 +149,8 @@
 2. 后端返回 token + 当前用户信息
 3. 前端保存 token
 4. 前端通过 HTTP 拉公共历史 / 私聊历史
-5. 等 `P3` 完成后，再建立 WebSocket
+5. 建立 WebSocket
+6. 收到 `session.ready` 后进入真实在线会话
 
 ### 为什么不是“登录成功立刻一把梭全做完”
 

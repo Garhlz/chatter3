@@ -13,8 +13,10 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 
 	protocolv2 "github.com/elaine/chatter2/backend-go/internal/protocol/v2"
+	"github.com/elaine/chatter2/backend-go/internal/repository"
 	"github.com/elaine/chatter2/backend-go/internal/session"
 	"github.com/elaine/chatter2/backend-go/internal/storage"
 )
@@ -26,10 +28,15 @@ import (
 type MessageService struct {
 	messages *storage.MessageRepository
 	sessions *session.Manager
+	users    *repository.UserRepository
 }
 
-func newMessageService(messages *storage.MessageRepository, sessions *session.Manager) *MessageService {
-	return &MessageService{messages: messages, sessions: sessions}
+func newMessageService(
+	messages *storage.MessageRepository,
+	sessions *session.Manager,
+	users *repository.UserRepository,
+) *MessageService {
+	return &MessageService{messages: messages, sessions: sessions, users: users}
 }
 
 // GetPublicHistory 返回按时间顺序排列的大厅消息分页。
@@ -115,6 +122,70 @@ func (s *MessageService) GetPrivateHistoryByIDs(ctx context.Context, userID1, us
 		nextCursor = strconv.FormatInt(rows[len(rows)-1].MessageID, 10)
 	}
 	return msgs, nextCursor, nil
+}
+
+// CreatePublicMessage persists a lobby message and returns the realtime payload shape.
+func (s *MessageService) CreatePublicMessage(ctx context.Context, sender *session.Session, content string) (*protocolv2.Message, error) {
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return nil, fmt.Errorf("content is required")
+	}
+
+	row, err := s.messages.InsertPublicMessage(ctx, sender.UserID, 0, content)
+	if err != nil {
+		return nil, err
+	}
+
+	return &protocolv2.Message{
+		MessageID: row.MessageID,
+		Scope:     "public",
+		Sender: protocolv2.User{
+			UserID:   sender.UserID,
+			Username: sender.Username,
+			Nickname: sender.Nickname,
+			Online:   true,
+		},
+		ContentType: "text",
+		Content:     content,
+		Timestamp:   row.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
+	}, nil
+}
+
+// CreatePrivateMessage persists a DM and returns both the recipient identity and realtime payload.
+func (s *MessageService) CreatePrivateMessage(ctx context.Context, sender *session.Session, receiverUsername, content string) (string, *protocolv2.Message, error) {
+	receiverUsername = strings.TrimSpace(receiverUsername)
+	content = strings.TrimSpace(content)
+	if receiverUsername == "" {
+		return "", nil, fmt.Errorf("receiverUsername is required")
+	}
+	if content == "" {
+		return "", nil, fmt.Errorf("content is required")
+	}
+
+	receiver, err := s.users.GetByUsername(ctx, receiverUsername)
+	if err != nil {
+		return "", nil, err
+	}
+
+	row, err := s.messages.InsertPrivateMessage(ctx, sender.UserID, receiver.UserID, 0, content)
+	if err != nil {
+		return "", nil, err
+	}
+
+	return receiver.Username, &protocolv2.Message{
+		MessageID: row.MessageID,
+		Scope:     "private",
+		Sender: protocolv2.User{
+			UserID:   sender.UserID,
+			Username: sender.Username,
+			Nickname: sender.Nickname,
+			Online:   true,
+		},
+		ReceiverUsername: receiver.Username,
+		ContentType:      "text",
+		Content:          content,
+		Timestamp:        row.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
+	}, nil
 }
 
 // parseCursor 把游标字符串解码为 message_id 整数。空字符串返回 0（从最新开始）。
