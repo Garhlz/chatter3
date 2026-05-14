@@ -17,7 +17,6 @@ import (
 )
 
 func main() {
-	// 结构化日志
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
 		Level: slog.LevelDebug,
 	})))
@@ -31,7 +30,6 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
-	// 数据库
 	pool, err := storage.Open(ctx, cfg.DatabaseURL)
 	if err != nil {
 		slog.Error("数据库初始化失败", "err", err)
@@ -39,13 +37,14 @@ func main() {
 	}
 	defer pool.Close()
 
-	// 核心组件
+	// Core shared components.
 	sessions := session.NewManager()
 	disp := dispatcher.New(sessions)
 
-	// 启动服务
 	var wg sync.WaitGroup
 
+	// Legacy TCP server — kept running as a compatibility reference.
+	// Remove this block once the v2 WebSocket path fully replaces it.
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -55,10 +54,11 @@ func main() {
 		}
 	}()
 
+	// v2 HTTP server — now receives pool and sessions so handlers can access DB and online state.
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		httpSrv := httptransport.NewServer(cfg)
+		httpSrv := httptransport.NewServer(cfg, pool, sessions)
 		if err := httpSrv.Run(ctx); err != nil {
 			slog.Error("HTTP 服务器退出", "err", err)
 		}
