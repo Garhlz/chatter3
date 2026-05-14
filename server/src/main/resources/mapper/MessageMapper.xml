@@ -1,0 +1,165 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.example.chatterserver.mapper.MessageMapper">
+
+    <!-- 结果映射：消息表 -->
+    <resultMap id="MessageMap" type="com.example.chatterserver.model.Message">
+        <id property="messageId" column="message_id"/>
+        <result property="senderId" column="sender_id"/>
+        <result property="receiverId" column="receiver_id"/>
+        <result property="groupId" column="group_id"/>
+        <result property="messageType" column="message_type"/>
+        <result property="content" column="content"/>
+        <result property="status" column="status"/>
+        <result property="createdAt" column="created_at" typeHandler="com.example.chatterserver.mapper.typehandler.LocalDateTimeTypeHandler"/>
+    </resultMap>
+
+    <!-- 结果映射：文件表 -->
+    <resultMap id="fileAttachmentResultMap" type="com.example.chatterserver.model.FileAttachment">
+        <id property="fileId" column="file_id"/>
+        <result property="messageId" column="message_id"/>
+        <result property="fileName" column="file_name"/>
+        <result property="storedFileName" column="stored_file_name"/>
+        <result property="fileUrl" column="file_url"/>
+        <result property="fileSize" column="file_size"/>
+        <result property="fileType" column="file_type"/>
+        <result property="md5" column="md5"/>
+        <result property="uploadTime" column="upload_time" typeHandler="com.example.chatterserver.mapper.typehandler.LocalDateTimeTypeHandler"/>
+    </resultMap>
+
+    <!-- 插入消息 -->
+    <insert id="insert" parameterType="com.example.chatterserver.model.Message" useGeneratedKeys="true" keyProperty="messageId">
+        INSERT INTO messages (sender_id, receiver_id, group_id, message_type, content, status, created_at)
+        VALUES (
+            #{senderId},
+            #{receiverId},
+            #{groupId},
+            #{messageType},
+            #{content},
+            #{status},
+            #{createdAt,typeHandler=com.example.chatterserver.mapper.typehandler.LocalDateTimeTypeHandler}
+        )
+    </insert>
+
+    <!-- 插入文件信息 -->
+    <insert id="insertFileInfo" parameterType="com.example.chatterserver.model.FileAttachment"
+            useGeneratedKeys="true" keyProperty="fileId" keyColumn="file_id">
+        INSERT INTO files (
+            message_id,
+            file_name,
+            stored_file_name,
+            file_url,
+            file_size,
+            file_type,
+            md5,
+            upload_time
+        ) VALUES (
+            #{messageId},
+            #{fileName},
+            #{storedFileName},
+            #{fileUrl},
+            #{fileSize},
+            #{fileType},
+            #{md5},
+            #{uploadTime,typeHandler=com.example.chatterserver.mapper.typehandler.LocalDateTimeTypeHandler}
+        )
+    </insert>
+
+    <!-- 查询私聊消息 -->
+    <select id="findPrivateMessages" resultMap="MessageMap">
+        SELECT m.message_id, m.sender_id, m.receiver_id, m.group_id,
+               m.message_type, m.content, m.status, m.created_at
+        FROM messages m
+        WHERE m.receiver_id IS NOT NULL
+        AND m.group_id IS NULL
+        AND (m.sender_id = #{userId} OR m.receiver_id = #{userId})
+        ORDER BY m.created_at ASC
+    </select>
+
+    <!-- 查询群聊消息 -->
+    <select id="findGroupMessages" resultMap="MessageMap">
+        SELECT m.message_id, m.sender_id, m.receiver_id, m.group_id,
+               m.message_type, m.content, m.status, m.created_at
+        FROM messages m
+        WHERE m.group_id = #{groupId}
+        ORDER BY m.created_at ASC
+        LIMIT #{limit}
+    </select>
+
+    <!-- 查询大厅消息 -->
+    <select id="findChatLobbyMessages" resultMap="MessageMap">
+        SELECT m.message_id, m.sender_id, m.receiver_id, m.group_id,
+               m.message_type, m.content, m.status, m.created_at
+        FROM messages m
+        WHERE m.receiver_id IS NULL
+        AND m.group_id IS NULL
+        ORDER BY m.created_at ASC
+    </select>
+
+    <!-- 更新消息状态 -->
+    <update id="updateStatus">
+        UPDATE messages
+        SET status = #{status}
+        WHERE message_id = #{messageId}
+    </update>
+
+    <!-- 根据id查询消息 -->
+    <select id="findMessageById" resultMap="MessageMap">
+        SELECT m.message_id, m.sender_id, m.receiver_id, m.group_id,
+               m.message_type, m.content, m.status, m.created_at
+        FROM messages m
+        WHERE m.message_id = #{messageId}
+    </select>
+        
+
+    <!-- 查询文件附件（按 message_id） -->
+    <select id="getFileAttachmentByMessageId" resultMap="fileAttachmentResultMap">
+        SELECT
+            file_id,
+            message_id,
+            file_name,
+            stored_file_name,
+            file_url,
+            file_size,
+            file_type,
+            md5,
+            upload_time
+        FROM
+            files
+        WHERE
+            message_id = #{messageId}
+    </select>
+
+    <!-- 查询文件附件（按 stored_file_name） -->
+    <select id="findFileAttachmentByStoredFileName" parameterType="string" resultMap="fileAttachmentResultMap">
+        SELECT
+            file_id,
+            message_id,
+            file_name,
+            stored_file_name,
+            file_url,
+            file_size,
+            file_type,
+            md5,
+            upload_time
+        FROM
+            files
+        WHERE
+            stored_file_name = #{storedFileName}
+    </select>
+
+    <select id="getAllGroupsMessageByUserId" resultMap="MessageMap">
+        SELECT
+            m.message_id, m.sender_id, m.receiver_id, m.group_id, m.message_type,
+            m.content, m.status, m.created_at
+        FROM
+            messages m
+        JOIN group_members gm ON gm.group_id = m.group_id
+        WHERE
+            gm.user_id = #{userId}
+        ORDER BY
+            created_at ASC
+    </select>
+
+</mapper>
