@@ -87,6 +87,13 @@ type Event[T any] struct {
 
 type PingPayload struct{}
 
+type ReadyPayload struct {
+	User             User   `json:"user"`
+	HeartbeatTimeout string `json:"heartbeatTimeout"`
+}
+
+type PongPayload struct{}
+
 type PublicSendPayload struct {
 	Content string `json:"content"`
 }

@@ -17,6 +17,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -73,7 +74,7 @@ func NewServer(
 	msgRepo := storage.NewMessageRepository(pool)
 
 	userSvc := usersvc.NewUserService(userRepo, jwtSvc)
-	msgSvc := newMessageService(msgRepo, sessions)
+	msgSvc := newMessageService(msgRepo, sessions, userRepo)
 
 	s := &Server{
 		cfg:      cfg,
@@ -129,10 +130,43 @@ func (s *Server) Run(ctx context.Context) error {
 		_ = s.server.Shutdown(shutCtx)
 	}()
 
+	go s.reapIdleSessions(ctx)
+
 	if err := s.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		return fmt.Errorf("HTTP 服务器异常退出: %w", err)
 	}
 	return nil
+}
+
+func (s *Server) reapIdleSessions(ctx context.Context) {
+	interval := s.cfg.HeartbeatTimeout / 2
+	if interval <= 0 {
+		interval = 30 * time.Second
+	}
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case now := <-ticker.C:
+			expired := s.sessions.ExpireIdleSessions(now, s.cfg.HeartbeatTimeout)
+			for _, sess := range expired {
+				sess.Shutdown()
+				s.sessions.Broadcast(eventJSON("presence.offline", "", protocolv2.PresencePayload{
+					User: protocolv2.User{
+						UserID:   sess.UserID,
+						Username: sess.Username,
+						Nickname: sess.Nickname,
+						Online:   false,
+					},
+				}), sess.Username)
+				slog.Info("session expired by heartbeat timeout", "username", sess.Username)
+			}
+		}
+	}
 }
 
 // --- Auth middleware ---
@@ -224,19 +258,15 @@ func (s *Server) handleV2Login(w http.ResponseWriter, r *http.Request) {
 // 这也是为什么 TODO 里已经把“真实在线状态语义”放进 P3：
 // 只有当 WebSocket 常驻连接接通后，这个列表才会真正有稳定意义。
 func (s *Server) handleV2OnlineUsers(w http.ResponseWriter, r *http.Request) {
-	names := s.sessions.OnlineUsernames()
+	snapshots := s.sessions.OnlineSnapshots()
 
-	users := make([]protocolv2.User, 0, len(names))
-	for _, name := range names {
-		sess := s.sessions.Get(name)
-		if sess == nil {
-			continue
-		}
+	users := make([]protocolv2.User, 0, len(snapshots))
+	for _, sess := range snapshots {
 		users = append(users, protocolv2.User{
 			UserID:   sess.UserID,
 			Username: sess.Username,
 			Nickname: sess.Nickname,
-			Online:   true,
+			Online:   sess.Online,
 		})
 	}
 
@@ -309,21 +339,163 @@ func (s *Server) handleV2PrivateHistory(w http.ResponseWriter, r *http.Request) 
 func (s *Server) handleV2WebSocket(w http.ResponseWriter, r *http.Request) {
 	// WebSocket auth uses ?token= because browsers cannot set custom headers
 	// during the initial WebSocket handshake.
-	//
-	// 当前这里只做“握手前认证入口”的占位说明，不进入真正事件循环。
-	// 这样前端和后端都能先围绕固定入口开发，而不会因为 ws 路由名反复变化而来回改代码。
 	tokenStr := r.URL.Query().Get("token")
 	if tokenStr == "" {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "token query param required")
 		return
 	}
-	_, err := s.jwtSvc.Verify(tokenStr)
+	claims, err := s.jwtSvc.Verify(tokenStr)
 	if err != nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "token is invalid or expired")
 		return
 	}
-	// Full WebSocket event loop is implemented in P3.
-	writeNotImplemented(w, "websocket event loop will be implemented in P3")
+
+	ws, err := acceptWebSocket(w, r)
+	if err != nil {
+		slog.Warn("websocket upgrade failed", "err", err)
+		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
+	defer ws.close()
+
+	sess := &session.Session{
+		UserID:        claims.UserID,
+		Username:      claims.Username,
+		Nickname:      claims.Nickname,
+		LastHeartbeat: time.Now(),
+		Close:         ws.close,
+		Send:          make(chan []byte, 32),
+	}
+
+	s.sessions.Register(sess)
+	// 上线通知只发给其他会话，避免自己收到一条“自己刚上线”的冗余事件。
+	s.sessions.Broadcast(eventJSON("presence.online", "", protocolv2.PresencePayload{
+		User: protocolv2.User{
+			UserID:   sess.UserID,
+			Username: sess.Username,
+			Nickname: sess.Nickname,
+			Online:   true,
+		},
+	}), sess.Username)
+	defer func() {
+		// 先把会话从 manager 移除，再关闭 send channel。
+		// 否则其他 goroutine 仍可能通过 manager 找到这个 session，
+		// 向已关闭的 channel 发送数据并触发 panic。
+		s.sessions.RemoveSession(sess)
+		sess.Shutdown()
+		s.sessions.Broadcast(eventJSON("presence.offline", "", protocolv2.PresencePayload{
+			User: protocolv2.User{
+				UserID:   sess.UserID,
+				Username: sess.Username,
+				Nickname: sess.Nickname,
+				Online:   false,
+			},
+		}), sess.Username)
+	}()
+
+	if err := ws.writeJSON(protocolv2.Event[protocolv2.ReadyPayload]{
+		Event:     "session.ready",
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+		Payload: protocolv2.ReadyPayload{
+			User: protocolv2.User{
+				UserID:   sess.UserID,
+				Username: sess.Username,
+				Nickname: sess.Nickname,
+				Online:   true,
+			},
+			HeartbeatTimeout: s.cfg.HeartbeatTimeout.String(),
+		},
+	}); err != nil {
+		slog.Warn("websocket ready write failed", "user", sess.Username, "err", err)
+		return
+	}
+
+	go func() {
+		for msg := range sess.Send {
+			if err := ws.writeFrame(wsOpcodeText, msg); err != nil {
+				return
+			}
+		}
+	}()
+
+	for {
+		_ = ws.setReadDeadline(time.Now().Add(s.cfg.HeartbeatTimeout))
+		opcode, payload, err := ws.readFrame()
+		if err != nil {
+			if !errors.Is(err, io.EOF) {
+				slog.Debug("websocket read ended", "user", sess.Username, "err", err)
+			}
+			return
+		}
+
+		switch opcode {
+		case wsOpcodeClose:
+			_ = ws.writeFrame(wsOpcodeClose, nil)
+			return
+		case wsOpcodePing:
+			if err := ws.writeFrame(wsOpcodePong, payload); err != nil {
+				return
+			}
+		case wsOpcodePong:
+			s.sessions.UpdateHeartbeat(sess.Username)
+		case wsOpcodeText:
+			var in wsInboundEvent
+			if err := json.Unmarshal(payload, &in); err != nil {
+				_ = ws.writeFrame(wsOpcodeText, errorEventJSON("bad_request", "invalid websocket JSON payload", ""))
+				continue
+			}
+
+			switch in.Event {
+			case "session.ping":
+				s.sessions.UpdateHeartbeat(sess.Username)
+				if err := ws.writeJSON(protocolv2.Event[protocolv2.PongPayload]{
+					Event:     "session.pong",
+					RequestID: in.RequestID,
+					Timestamp: time.Now().UTC().Format(time.RFC3339),
+					Payload:   protocolv2.PongPayload{},
+				}); err != nil {
+					return
+				}
+			case "chat.public.send":
+				var payload protocolv2.PublicSendPayload
+				if err := json.Unmarshal(in.Payload, &payload); err != nil {
+					_ = ws.writeFrame(wsOpcodeText, errorEventJSON("bad_request", "invalid public chat payload", in.RequestID))
+					continue
+				}
+
+				msg, err := s.msgSvc.CreatePublicMessage(r.Context(), sess, payload.Content)
+				if err != nil {
+					_ = ws.writeFrame(wsOpcodeText, errorEventJSON("bad_request", err.Error(), in.RequestID))
+					continue
+				}
+				s.sessions.Broadcast(eventJSON("chat.public.message", in.RequestID, msg), "")
+			case "chat.private.send":
+				var payload protocolv2.PrivateSendPayload
+				if err := json.Unmarshal(in.Payload, &payload); err != nil {
+					_ = ws.writeFrame(wsOpcodeText, errorEventJSON("bad_request", "invalid private chat payload", in.RequestID))
+					continue
+				}
+
+				receiverUsername, msg, err := s.msgSvc.CreatePrivateMessage(r.Context(), sess, payload.ReceiverUsername, payload.Content)
+				if err != nil {
+					code := "bad_request"
+					if errors.Is(err, repository.ErrNotFound) {
+						code = "not_found"
+					}
+					_ = ws.writeFrame(wsOpcodeText, errorEventJSON(code, err.Error(), in.RequestID))
+					continue
+				}
+
+				body := eventJSON("chat.private.message", in.RequestID, msg)
+				_ = s.sessions.Send(receiverUsername, body)
+				_ = s.sessions.Send(sess.Username, body)
+			default:
+				_ = ws.writeFrame(wsOpcodeText, errorEventJSON("not_implemented", "websocket event is not implemented yet", in.RequestID))
+			}
+		default:
+			_ = ws.writeFrame(wsOpcodeText, errorEventJSON("bad_request", "unsupported websocket opcode", ""))
+		}
+	}
 }
 
 func (s *Server) handleV2Upload(w http.ResponseWriter, _ *http.Request) {
