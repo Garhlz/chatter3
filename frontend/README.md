@@ -55,3 +55,8 @@ npm run dev
 - 基础连接状态展示
 
 群聊、文件上传交互和通知能力暂未实现。
+
+## 进一步阅读
+
+- 整体开发结构说明见 [docs/dev-architecture.md](../docs/dev-architecture.md)
+- 协议契约见 [docs/protocol-v2.md](../docs/protocol-v2.md)
