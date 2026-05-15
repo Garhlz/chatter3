@@ -47,6 +47,7 @@ type Message struct {
 	Scope            string          `json:"scope"`
 	Sender           User            `json:"sender"`
 	ReceiverUsername string          `json:"receiverUsername,omitempty"`
+	GroupID          int64           `json:"groupID,omitempty"`
 	ContentType      string          `json:"contentType"`
 	Content          string          `json:"content"`
 	File             *FileAttachment `json:"file,omitempty"`
@@ -108,3 +109,41 @@ type PresencePayload struct {
 }
 
 type ErrorPayload = ErrorBody
+
+// Group is the protocol representation of a chat group.
+type Group struct {
+	GroupID     int64  `json:"groupID"`
+	GroupName   string `json:"groupName"`
+	Creator     User   `json:"creator"`
+	MemberCount int    `json:"memberCount"`
+	CreatedAt   string `json:"createdAt"`
+}
+
+// GroupMember is a user with their role within a group.
+type GroupMember struct {
+	User     User   `json:"user"`
+	Role     int16  `json:"role"`
+	JoinedAt string `json:"joinedAt"`
+}
+
+// GroupSendPayload is the WebSocket payload for sending a group message.
+type GroupSendPayload struct {
+	GroupID int64  `json:"groupID"`
+	Content string `json:"content"`
+}
+
+// CreateGroupRequest is the HTTP body for creating a group.
+type CreateGroupRequest struct {
+	GroupName string   `json:"groupName"`
+	Members   []string `json:"members,omitempty"`
+}
+
+// CreateGroupResponse wraps the created group.
+type CreateGroupResponse struct {
+	Group Group `json:"group"`
+}
+
+// AddGroupMemberRequest is the HTTP body for adding members.
+type AddGroupMemberRequest struct {
+	Usernames []string `json:"usernames"`
+}

@@ -18,6 +18,29 @@
 - 服务端推导的字段不由客户端重复提交
 - 同一类消息在实时事件和历史接口中使用一致的数据结构
 
+## 当前稳定性
+
+截至当前阶段，以下契约可以视为前后端稳定依赖：
+
+- HTTP 认证：`POST /api/v2/auth/register`、`POST /api/v2/auth/login`
+- HTTP 历史与在线列表：`GET /api/v2/users/online`、公共历史、私聊历史
+- WebSocket 鉴权：`GET /api/v2/ws?token=<token>`
+- WebSocket 会话事件：`session.ready`、`session.ping`、`session.pong`
+- WebSocket 在线事件：`presence.online`、`presence.offline`
+- WebSocket 文本聊天：`chat.public.send`、`chat.private.send`、`chat.group.send` 及对应 message 事件
+- 文件上传下载：`POST /api/v2/files/upload`、`GET /api/v2/files/{fileId}`
+- 群聊：`POST /api/v2/groups`、群组列表、成员管理、群历史
+- 文本消息输入约束和错误码集合
+
+以下契约仍处于待实现或待冻结状态：
+
+- 已读回执
+- 撤回
+- 多端同步策略
+- 推送通知
+
+因此，当前前后端可以围绕”认证、历史、在线状态、文本聊天、文件、群聊”继续并行开发。
+
 ## 1. 认证模型
 
 ### 1.1 HTTP 登录
@@ -144,13 +167,101 @@
 - Header: `Authorization: Bearer <token>`
 - 表单字段：
   - `file`
-  - `receiverUsername`
+  - `receiverUsername`（可选）
 
-响应返回统一的文件元数据结构。
+行为：
+
+- 不带 `receiverUsername` 时，创建公共文件消息
+- 带 `receiverUsername` 时，创建私聊文件消息
+- 上传成功后返回统一的文件元数据结构
+- 同时沿用现有实时消息事件：
+  - 公共上传 -> `chat.public.message`
+  - 私聊上传 -> `chat.private.message`
 
 #### `GET /api/v2/files/{fileId}`
 
 下载文件，权限规则由服务端校验发送者/接收者关系。
+
+### 2.5 群组
+
+#### `POST /api/v2/groups`
+
+创建群组。
+
+请求：
+
+```json
+{
+  "groupName": "My Group",
+  "members": ["bob", "carol"]
+}
+```
+
+响应（201）：
+
+```json
+{
+  "data": {
+    "group": {
+      "groupID": 1,
+      "groupName": "My Group",
+      "creator": {
+        "userId": 1,
+        "username": "alice",
+        "nickname": "Alice"
+      },
+      "memberCount": 3,
+      "createdAt": "2026-05-15T12:00:00Z"
+    }
+  }
+}
+```
+
+#### `GET /api/v2/groups`
+
+返回当前用户所属群组列表。
+
+#### `GET /api/v2/groups/{groupID}`
+
+返回单个群组详情。
+
+#### `GET /api/v2/groups/{groupID}/members`
+
+返回群组成员列表。
+
+响应：
+
+```json
+{
+  "data": [
+    {
+      "user": { "userId": 1, "username": "alice", "nickname": "Alice", "online": true },
+      "role": 2,
+      "joinedAt": "2026-05-15T12:00:00Z"
+    }
+  ]
+}
+```
+
+#### `POST /api/v2/groups/{groupID}/members`
+
+添加成员（需管理员或群主权限）。
+
+请求：
+
+```json
+{
+  "usernames": ["carol"]
+}
+```
+
+#### `DELETE /api/v2/groups/{groupID}/members/{username}`
+
+移除成员。调用者可以移除自己，群主或管理员可以移除其他人。不能移除群主。
+
+#### `GET /api/v2/groups/{groupID}/history?limit=50&cursor=...`
+
+返回群聊消息历史。调用者必须是群成员。
 
 ## 3. WebSocket 事件
 
@@ -191,6 +302,19 @@
   "payload": {
     "receiverUsername": "bob",
     "content": "hello"
+  }
+}
+```
+
+#### 发送群聊消息
+
+```json
+{
+  "event": "chat.group.send",
+  "requestId": "req-3",
+  "payload": {
+    "groupID": 1,
+    "content": "hello everyone"
   }
 }
 ```
@@ -247,6 +371,46 @@
 }
 ```
 
+#### 群聊消息发送
+
+```json
+{
+  "event": "chat.group.send",
+  "requestId": "req-3",
+  "payload": {
+    "groupID": 1,
+    "content": "hello everyone"
+  }
+}
+```
+
+#### 群聊消息事件
+
+```json
+{
+  "event": "chat.group.message",
+  "timestamp": "2026-05-15T12:00:00Z",
+  "payload": {
+    "messageId": 100,
+    "scope": "group",
+    "sender": {
+      "userId": 1,
+      "username": "alice",
+      "nickname": "Alice"
+    },
+    "groupID": 1,
+    "content": "hello everyone",
+    "contentType": "text"
+  }
+}
+```
+
+**约束**：
+
+- 发送者必须是群成员
+- 群消息广播给所有在线群成员（含发送者）
+- 离线成员可通过历史接口拉取
+
 #### 用户上线/下线事件
 
 - `presence.online`
@@ -268,6 +432,30 @@
   }
 }
 ```
+
+当前后端已固定的 WebSocket 错误码：
+
+- `bad_request`：请求结构或业务输入非法
+- `unauthorized`：认证失败
+- `not_found`：目标资源不存在
+- `payload_too_large`：消息体超过服务端限制
+- `internal_error`：服务端内部错误
+- `forbidden`：无权限访问
+- `not_implemented`：事件尚未实现
+
+当前文本消息输入约束：
+
+- `content` 会 trim 首尾空白
+- trim 后不能为空
+- 最长 4096 字符
+- 私聊 `receiverUsername` 不能为空
+- 不允许给自己发送私聊
+
+当前文件消息约束：
+
+- 上传字段 `file` 必填
+- 上传大小受服务端 `MAX_FILE_SIZE_MB` 限制
+- 私聊文件不允许把 `receiverUsername` 指向自己
 
 ## 4. 核心资源结构
 
@@ -314,21 +502,54 @@
 }
 ```
 
+### 4.4 Group
+
+```json
+{
+  "groupID": 1,
+  "groupName": "My Group",
+  "creator": {
+    "userId": 1,
+    "username": "alice",
+    "nickname": "Alice"
+  },
+  "memberCount": 3,
+  "createdAt": "2026-05-15T12:00:00Z"
+}
+```
+
+### 4.5 GroupMember
+
+```json
+{
+  "user": {
+    "userId": 2,
+    "username": "bob",
+    "nickname": "Bob",
+    "online": true
+  },
+  "role": 0,
+  "joinedAt": "2026-05-15T12:00:00Z"
+}
+```
+
+role 值：0=member、1=admin、2=owner。
+
 ## 5. 首版范围
 
-v2 首版只冻结以下能力：
+v2 当前已冻结以下能力：
 
 - 注册
 - 登录
 - 在线用户列表
 - 公共聊天
 - 私聊
-- 文件元数据与下载链接
-- WebSocket 心跳与错误事件
-
-以下能力不在 v2 首版范围内：
-
 - 群聊
+- WebSocket 心跳与错误事件
+- 文件上传下载
+
+以下能力仍未冻结：
+
 - 已读回执
 - 撤回
 - 多端同步策略
