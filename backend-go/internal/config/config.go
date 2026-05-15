@@ -13,7 +13,6 @@ import (
 // Config 是应用全局配置，由环境变量或默认值填充。
 type Config struct {
 	// 服务器
-	TCPPort  int
 	HTTPPort int
 
 	// 数据库
@@ -44,7 +43,6 @@ func Load() (*Config, error) {
 	}
 
 	cfg := &Config{
-		TCPPort:          intEnv("TCP_PORT", 9999),
 		HTTPPort:         intEnv("HTTP_PORT", 8080),
 		UploadDir:        strEnv("UPLOAD_DIR", "./upload_files"),
 		MaxFileSize:      int64(intEnv("MAX_FILE_SIZE_MB", 50)) * 1024 * 1024,
@@ -66,7 +64,6 @@ func Load() (*Config, error) {
 	}
 
 	slog.Info("配置加载完成",
-		"tcp_port", cfg.TCPPort,
 		"http_port", cfg.HTTPPort,
 		"upload_dir", cfg.UploadDir,
 		"heartbeat_timeout", cfg.HeartbeatTimeout,
