@@ -21,16 +21,21 @@
 
 ## Backend Next
 
-- [ ] 为 WebSocket 事件路径补更细的测试覆盖
-- [ ] 明确公共/私聊发送失败时的最终错误码约定
-- [ ] 为 `chat.public.send` / `chat.private.send` 增加更明确的输入约束与错误语义
-- [ ] 评估并决定消息链路是否继续保留在 `storage + transport/http/service.go`，还是归并到更正式的 service/repository 结构
+- [x] 将消息链路从 `transport/http/service.go` 归并到正式 `service/repository` 结构
+- [x] 明确公共/私聊发送失败时的基础错误码约定
+- [x] 为 `chat.public.send` / `chat.private.send` 增加明确的文本输入约束
+- [x] 为消息输入约束和 WS 错误码映射补基础测试
+- [x] 为 WebSocket 握手、`session.ready`、`session.ping`、错误事件补 handler 级测试
+- [x] 为消息 service 增加 opt-in 数据库集成测试，覆盖公共/私聊落库与历史读取
+- [x] 为公共/私聊发送的在线/离线投递语义补集成测试
+- [x] 为 `chat.public.send` / `chat.private.send` 的 WebSocket 成功路径补集成测试
+- [x] 实现 `POST /api/v2/files/upload`
+- [x] 实现 `GET /api/v2/files/{fileId}`
+- [x] 文件元数据与历史消息结构对齐
+- [x] 为文件上传下载补错误路径测试：超限、目标用户不存在、越权下载
 
 ## Backend Later
 
-- [ ] `POST /api/v2/files/upload`
-- [ ] `GET /api/v2/files/{fileId}`
-- [ ] 文件元数据持久化与消息结构对齐
 - [ ] 群聊协议、持久化与实时广播
 
 ## Backend 产出目标
@@ -38,3 +43,39 @@
 - 后端实时链路具备稳定语义和测试保护
 - 错误码、输入约束、在线状态和消息事件可以被前端稳定依赖
 - 后续文件与群聊能力可以在当前协议上继续扩展
+
+## 后端协议稳定性
+
+当前可以视为稳定后端契约：
+
+- HTTP 注册、登录、在线用户、公共历史、私聊历史
+- WebSocket token 握手
+- `session.ready`、`session.ping`、`session.pong`
+- `presence.online`、`presence.offline`
+- `chat.public.send -> chat.public.message`
+- `chat.private.send -> chat.private.message`
+- 文本消息约束和 WS 错误码集合
+- `POST /api/v2/files/upload`
+- `GET /api/v2/files/{fileId}`
+
+当前仍不应视为稳定契约：
+
+- 群聊协议
+- 已读、撤回、多端同步等扩展能力
+
+## 当前错误语义
+
+WebSocket `error` 事件当前使用这些稳定 code：
+
+- `bad_request`：JSON 结构错误、空内容、缺少接收者、私聊自己、非法 cursor
+- `not_found`：私聊目标用户不存在
+- `payload_too_large`：文本消息超过 4096 字符
+- `internal_error`：服务端内部错误，响应不会暴露底层数据库错误
+- `not_implemented`：事件尚未实现
+
+当前消息投递语义：
+
+- 公共消息先落库，成功后广播给所有在线会话，包括发送者
+- 私聊消息先落库，成功后发送给发送者和在线接收者
+- 私聊接收者离线时仍然落库，后续由历史接口读取
+- 实时投递失败不回滚已经成功的数据库写入

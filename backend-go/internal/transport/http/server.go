@@ -19,8 +19,11 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"mime"
 	"net"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -31,9 +34,8 @@ import (
 	"github.com/elaine/chatter2/backend-go/internal/config"
 	protocolv2 "github.com/elaine/chatter2/backend-go/internal/protocol/v2"
 	"github.com/elaine/chatter2/backend-go/internal/repository"
-	usersvc "github.com/elaine/chatter2/backend-go/internal/service"
+	appsvc "github.com/elaine/chatter2/backend-go/internal/service"
 	"github.com/elaine/chatter2/backend-go/internal/session"
-	"github.com/elaine/chatter2/backend-go/internal/storage"
 )
 
 // contextKey is a private type for context values to avoid collisions.
@@ -47,9 +49,9 @@ type Server struct {
 	server   *http.Server
 	sessions *session.Manager
 	jwtSvc   *auth.JWTService
-	userSvc  *usersvc.UserService
-	msgSvc   *MessageService
-	userRepo *repository.UserRepository
+	userSvc  *appsvc.UserService
+	msgSvc   *appsvc.MessageService
+	fileSvc  *appsvc.FileService
 }
 
 // NewServer wires up all routes and dependencies.
@@ -71,10 +73,12 @@ func NewServer(
 	jwtSvc := auth.NewJWTService(cfg.JWTSecret, cfg.JWTExpiration)
 
 	userRepo := repository.NewUserRepository(pool)
-	msgRepo := storage.NewMessageRepository(pool)
+	msgRepo := repository.NewMessageRepository(pool)
+	fileRepo := repository.NewFileRepository(pool)
 
-	userSvc := usersvc.NewUserService(userRepo, jwtSvc)
-	msgSvc := newMessageService(msgRepo, sessions, userRepo)
+	userSvc := appsvc.NewUserService(userRepo, jwtSvc)
+	msgSvc := appsvc.NewMessageService(msgRepo, sessions, userRepo)
+	fileSvc := appsvc.NewFileService(fileRepo, userRepo, sessions, cfg.UploadDir, cfg.MaxFileSize)
 
 	s := &Server{
 		cfg:      cfg,
@@ -82,7 +86,7 @@ func NewServer(
 		jwtSvc:   jwtSvc,
 		userSvc:  userSvc,
 		msgSvc:   msgSvc,
-		userRepo: userRepo,
+		fileSvc:  fileSvc,
 	}
 
 	mux := http.NewServeMux()
@@ -102,9 +106,9 @@ func NewServer(
 	// WebSocket — auth via ?token= query param (browsers can't set headers on WS).
 	mux.HandleFunc("GET /api/v2/ws", s.handleV2WebSocket)
 
-	// File endpoints — deferred to P6.
-	mux.HandleFunc("POST /api/v2/files/upload", s.handleV2Upload)
-	mux.HandleFunc("GET /api/v2/files/{fileID}", s.handleV2Download)
+	// File endpoints — auth required.
+	mux.HandleFunc("POST /api/v2/files/upload", s.auth(s.handleV2Upload))
+	mux.HandleFunc("GET /api/v2/files/{fileID}", s.auth(s.handleV2Download))
 
 	s.server = &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.HTTPPort),
@@ -213,7 +217,7 @@ func (s *Server) handleV2Register(w http.ResponseWriter, r *http.Request) {
 	}
 
 	user, err := s.userSvc.Register(r.Context(), req.Username, req.Password, req.Nickname)
-	if errors.Is(err, usersvc.ErrUsernameTaken) {
+	if errors.Is(err, appsvc.ErrUsernameTaken) {
 		writeError(w, http.StatusConflict, "username_taken", "username is already in use")
 		return
 	}
@@ -237,7 +241,7 @@ func (s *Server) handleV2Login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	token, user, err := s.userSvc.Login(r.Context(), req.Username, req.Password)
-	if errors.Is(err, usersvc.ErrInvalidCredentials) {
+	if errors.Is(err, appsvc.ErrInvalidCredentials) {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "invalid username or password")
 		return
 	}
@@ -280,6 +284,10 @@ func (s *Server) handleV2PublicHistory(w http.ResponseWriter, r *http.Request) {
 	cursor := r.URL.Query().Get("cursor")
 
 	msgs, nextCursor, err := s.msgSvc.GetPublicHistory(r.Context(), cursor, limit)
+	if errors.Is(err, appsvc.ErrInvalidCursor) {
+		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	}
 	if err != nil {
 		slog.Error("public history failed", "err", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "failed to load history")
@@ -302,28 +310,18 @@ func (s *Server) handleV2PrivateHistory(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Look up the other user's ID — needed for the two-party query.
-	otherUser, err := s.userRepo.GetByUsername(r.Context(), otherUsername)
+	limit := queryInt(r, "limit", 50)
+	cursor := r.URL.Query().Get("cursor")
+
+	msgs, nextCursor, err := s.msgSvc.GetPrivateHistory(r.Context(), claims.UserID, otherUsername, cursor, limit)
 	if errors.Is(err, repository.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "not_found", "user not found")
 		return
 	}
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal_error", "lookup failed")
+	if errors.Is(err, appsvc.ErrInvalidCursor) || errors.Is(err, appsvc.ErrReceiverRequired) {
+		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
 		return
 	}
-
-	limit := queryInt(r, "limit", 50)
-	beforeID := int64(0)
-	if c := r.URL.Query().Get("cursor"); c != "" {
-		if parsed, err := strconv.ParseInt(c, 10, 64); err == nil {
-			beforeID = parsed
-		}
-	}
-
-	msgs, nextCursor, err := s.msgSvc.GetPrivateHistoryByIDs(
-		r.Context(), claims.UserID, otherUser.UserID, beforeID, limit,
-	)
 	if err != nil {
 		slog.Error("private history failed", "err", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "failed to load history")
@@ -465,7 +463,7 @@ func (s *Server) handleV2WebSocket(w http.ResponseWriter, r *http.Request) {
 
 				msg, err := s.msgSvc.CreatePublicMessage(r.Context(), sess, payload.Content)
 				if err != nil {
-					_ = ws.writeFrame(wsOpcodeText, errorEventJSON("bad_request", err.Error(), in.RequestID))
+					_ = ws.writeFrame(wsOpcodeText, messageErrorEventJSON(err, in.RequestID))
 					continue
 				}
 				s.sessions.Broadcast(eventJSON("chat.public.message", in.RequestID, msg), "")
@@ -478,11 +476,7 @@ func (s *Server) handleV2WebSocket(w http.ResponseWriter, r *http.Request) {
 
 				receiverUsername, msg, err := s.msgSvc.CreatePrivateMessage(r.Context(), sess, payload.ReceiverUsername, payload.Content)
 				if err != nil {
-					code := "bad_request"
-					if errors.Is(err, repository.ErrNotFound) {
-						code = "not_found"
-					}
-					_ = ws.writeFrame(wsOpcodeText, errorEventJSON(code, err.Error(), in.RequestID))
+					_ = ws.writeFrame(wsOpcodeText, messageErrorEventJSON(err, in.RequestID))
 					continue
 				}
 
@@ -498,12 +492,123 @@ func (s *Server) handleV2WebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) handleV2Upload(w http.ResponseWriter, _ *http.Request) {
-	writeNotImplemented(w, "file upload will be implemented in P6")
+func (s *Server) handleV2Upload(w http.ResponseWriter, r *http.Request) {
+	claims := claimsFrom(r)
+
+	r.Body = http.MaxBytesReader(w, r.Body, s.cfg.MaxFileSize+(1<<20))
+	if err := r.ParseMultipartForm(s.cfg.MaxFileSize + (1 << 20)); err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			writeError(w, http.StatusRequestEntityTooLarge, "payload_too_large", "file is too large")
+			return
+		}
+		writeError(w, http.StatusBadRequest, "bad_request", "invalid multipart form")
+		return
+	}
+
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "file is required")
+		return
+	}
+	defer file.Close()
+
+	result, err := s.fileSvc.SaveUpload(r.Context(), appsvc.FileUploadInput{
+		SenderID:         claims.UserID,
+		SenderUsername:   claims.Username,
+		SenderNickname:   claims.Nickname,
+		ReceiverUsername: r.FormValue("receiverUsername"),
+		FileName:         header.Filename,
+		MIMEType:         header.Header.Get("Content-Type"),
+		Size:             header.Size,
+		Reader:           file,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, appsvc.ErrFileRequired),
+			errors.Is(err, appsvc.ErrReceiverRequired),
+			errors.Is(err, appsvc.ErrCannotMessageSelf):
+			writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+			return
+		case errors.Is(err, appsvc.ErrFileTooLarge):
+			writeError(w, http.StatusRequestEntityTooLarge, "payload_too_large", "file is too large")
+			return
+		case errors.Is(err, repository.ErrNotFound):
+			writeError(w, http.StatusNotFound, "not_found", "user not found")
+			return
+		default:
+			slog.Error("file upload failed", "err", err)
+			writeError(w, http.StatusInternalServerError, "internal_error", "file upload failed")
+			return
+		}
+	}
+
+	if result.ReceiverUsername == "" {
+		s.sessions.Broadcast(eventJSON("chat.public.message", "", result.Message), "")
+	} else {
+		body := eventJSON("chat.private.message", "", result.Message)
+		_ = s.sessions.Send(result.ReceiverUsername, body)
+		_ = s.sessions.Send(claims.Username, body)
+	}
+
+	writeJSON(w, http.StatusCreated, protocolv2.APIResponse[protocolv2.UploadResponse]{
+		Data: protocolv2.UploadResponse{File: result.File},
+	})
 }
 
-func (s *Server) handleV2Download(w http.ResponseWriter, _ *http.Request) {
-	writeNotImplemented(w, "file download will be implemented in P6")
+func (s *Server) handleV2Download(w http.ResponseWriter, r *http.Request) {
+	claims := claimsFrom(r)
+	fileID, err := strconv.ParseInt(r.PathValue("fileID"), 10, 64)
+	if err != nil || fileID <= 0 {
+		writeError(w, http.StatusBadRequest, "bad_request", "invalid file id")
+		return
+	}
+
+	download, err := s.fileSvc.GetDownload(r.Context(), claims.UserID, fileID)
+	if errors.Is(err, repository.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "not_found", "file not found")
+		return
+	}
+	if errors.Is(err, appsvc.ErrForbiddenFile) {
+		writeError(w, http.StatusForbidden, "forbidden", "file access denied")
+		return
+	}
+	if err != nil {
+		slog.Error("file download lookup failed", "file_id", fileID, "err", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "file lookup failed")
+		return
+	}
+
+	fd, err := os.Open(download.Path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			writeError(w, http.StatusNotFound, "not_found", "file content not found")
+			return
+		}
+		slog.Error("file open failed", "file_id", fileID, "err", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "file open failed")
+		return
+	}
+	defer fd.Close()
+
+	stat, err := fd.Stat()
+	if err != nil {
+		slog.Error("file stat failed", "file_id", fileID, "err", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "file stat failed")
+		return
+	}
+
+	contentType := download.MIMEType
+	if contentType == "" {
+		contentType = mime.TypeByExtension(strings.ToLower(filepath.Ext(download.FileName)))
+	}
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", download.FileName))
+	http.ServeContent(w, r, download.FileName, stat.ModTime(), fd)
 }
 
 // --- Helpers ---
@@ -526,6 +631,31 @@ func writeNotImplemented(w http.ResponseWriter, msg string) {
 	writeJSON(w, http.StatusNotImplemented, protocolv2.APIErrorResponse{
 		Error: protocolv2.ErrorBody{Code: "not_implemented", Message: msg},
 	})
+}
+
+func messageErrorCode(err error) string {
+	switch {
+	case errors.Is(err, appsvc.ErrContentTooLong):
+		return "payload_too_large"
+	case errors.Is(err, repository.ErrNotFound):
+		return "not_found"
+	case errors.Is(err, appsvc.ErrContentRequired),
+		errors.Is(err, appsvc.ErrReceiverRequired),
+		errors.Is(err, appsvc.ErrCannotMessageSelf),
+		errors.Is(err, appsvc.ErrInvalidCursor):
+		return "bad_request"
+	default:
+		return "internal_error"
+	}
+}
+
+func messageErrorEventJSON(err error, requestID string) []byte {
+	code := messageErrorCode(err)
+	message := err.Error()
+	if code == "internal_error" {
+		message = "message operation failed"
+	}
+	return errorEventJSON(code, message, requestID)
 }
 
 // decodeJSON decodes r.Body into dst. Returns false and writes a 400 if it fails.
