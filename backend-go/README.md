@@ -115,6 +115,25 @@ cd backend-go
 go test ./...
 ```
 
+跑数据库集成测试：
+
+```bash
+cd backend-go
+set -a
+source .env
+set +a
+CHATTER_TEST_DATABASE_URL="$DATABASE_URL" go test ./internal/service -run Integration
+CHATTER_TEST_DATABASE_URL="$DATABASE_URL" go test ./internal/transport/http -run Integration
+```
+
+说明：
+
+- 普通 `go test ./...` 不依赖 Docker PostgreSQL
+- 集成测试需要先执行 migration
+- `internal/service` 集成测试覆盖消息落库与历史读取
+- `internal/transport/http` 集成测试覆盖 WebSocket 发送、落库、实时投递、离线私聊回推，以及文件上传下载
+- 集成测试会创建临时用户和消息，并在测试结束后清理
+
 生成 `sqlc`：
 
 ```bash
@@ -173,6 +192,7 @@ JWT_EXPIRATION=24h
 - `P2`：HTTP 注册 / 登录 / 历史同步
 - JWT、密码哈希、用户 repository / service 分层
 - 公共历史 / 私聊历史 HTTP 查询
+- 消息 repository / service 分层
 - `P3` 后端实时链路：
   - WebSocket token 握手
   - `session.ready`
@@ -183,10 +203,50 @@ JWT_EXPIRATION=24h
   - `chat.public.send -> chat.public.message`
   - `chat.private.send -> chat.private.message`
   - `GET /api/v2/users/online`
+- 文件上传下载：
+  - `POST /api/v2/files/upload`
+  - `GET /api/v2/files/{fileId}`
+  - 上传时同时创建一条文件消息
+  - 公共上传广播 `chat.public.message`
+  - 私聊上传投递 `chat.private.message`
+
+当前消息约束：
+
+- 文本消息会 trim 首尾空白
+- 文本消息不能为空
+- 文本消息最长 4096 字符
+- 私聊必须提供 `receiverUsername`
+- 不允许给自己发送私聊
+- 私聊目标离线时仍然落库，后续可通过历史接口读取
+
+当前文件约束：
+
+- 上传必须携带 `multipart/form-data` 字段 `file`
+- 可选字段 `receiverUsername` 决定公共文件消息或私聊文件消息
+- 上传大小受 `MAX_FILE_SIZE_MB` 限制
+- 下载权限继承消息权限：
+  - 公共文件：任意已登录用户可下载
+  - 私聊文件：仅发送者和接收者可下载
+
+## 协议稳定性
+
+当前前后端之间可以稳定依赖：
+
+- HTTP 注册 / 登录 / 在线用户 / 公共历史 / 私聊历史
+- WebSocket token 握手
+- `session.ready`、`session.ping`、`session.pong`
+- `presence.online`、`presence.offline`
+- 公共/私聊文本消息发送与实时事件
+- 文本消息输入约束和错误码集合
+- 文件上传下载 HTTP 接口
+- 通过上传触发的文件消息实时事件
+
+还不稳定：
+
+- 群聊相关协议
 
 未完成：
 
-- 文件上传下载闭环
 - 群聊能力
 
 ## 目录结构
@@ -198,13 +258,13 @@ internal/
   config/         配置加载
   dispatcher/     消息分发
   protocol/       消息类型定义 + JSON 编解码
-  repository/     用户侧数据库访问
-  service/        用户侧业务逻辑
+  repository/     用户与消息数据库访问
+  service/        用户与消息业务逻辑
   session/        在线会话管理
-  storage/        pgxpool 初始化 + 当前消息历史查询实现
+  storage/        pgxpool 初始化
   transport/
     tcp/          旧 TCP 兼容参考
-    http/         HTTP v2 路由与消息历史组装
+    http/         HTTP v2 路由与 WebSocket transport
 migrations/       goose 迁移文件
 sql/queries/      sqlc 查询 SQL
 ```
