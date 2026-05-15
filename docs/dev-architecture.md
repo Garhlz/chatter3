@@ -24,20 +24,38 @@
 - 登录 / 注册 / 历史拉取的 HTTP 路径
 - 远程开发下通过 `Vite proxy` 访问后端
 - `realtime client`
-- 基于 `Soft Desktop` 的桌面客户端主界面重构
+- 基于 `Terminal Neon` 的桌面客户端主界面重构
 - 公共消息 / 私聊消息的基础发送 UI
+- `zustand` 状态层
+- 前端派生会话列表
+- 自动重连与重连提示
+- 发送中 / 失败 / 重试 / 已确认状态
+- 历史分页 cursor 状态与加载更早入口
+- `requestId` 优先的发送确认，兼容当前近时间内容匹配 fallback
+- token 失效、重连耗尽、历史分页失败的基础错误恢复
+- UI 已拆分到 `frontend/src/components`
+- 桌面快捷键集中在 `frontend/src/hooks/useKeyboardShortcuts.ts`
+- 会话切换优先使用本地缓存，显式 reload 才刷新历史
 
 当前仍待落地：
 
-- 更稳定的重连策略
-- 更完整的在线用户 / 会话状态层
-- 发送中的 loading / retry / fail 反馈
-- 是否正式迁到统一状态层（如 `zustand`）
+- 后端正式保证消息事件回传 `requestId` 后，移除前端近时间内容匹配 fallback
+- 群文件上传（当前后端上传 API 不支持 groupID 参数）
+- 删群（后端未实现 DELETE /api/v2/groups/{groupID}）
+
+已落地（2026-05）：
+
+- `chatStore.ts` 已拆分 helper 函数到 `helpers.ts`，store 主体精简
+- 文件上传/下载 HTTP 闭环与文件消息实时事件展示
+- 群聊界面（创建群、群会话列表、群消息收发、成员管理）
+- `Ctrl/Cmd+G` 聚焦群创建输入框
 
 更新：
 
 - 登录成功后的 WebSocket 建连与基础事件消费已经接上
-- 当前更大的未完成项已经转为：重连策略、消息发送 UI、以及更成熟的状态层整理
+- 当前文本聊天协议（公共/私聊/群聊）可作为前端稳定开发基线
+- 文件上传下载与文件消息事件已稳定
+- 不稳定协议范围是：群文件上传、删群、已读、撤回、多端同步
 
 不负责：
 
@@ -91,14 +109,13 @@
 - `internal/transport/http/`
   - HTTP handler、middleware、路由装配
 - `internal/storage/`
-  - 当前仍保留“已稳定可用但尚未归并”的消息查询实现
+  - pgxpool 初始化
 
 这里要注意一件事：
 
-- “目录叫 `storage`” 不代表它是最终架构
-- 它目前主要承载消息历史查询这条已经可工作的链路
-- 认证相关逻辑已经归并进更清晰的 `auth/repository/service` 结构
-- 消息侧会等 `P3/P4` 一起整理，避免把错误 schema 的旧草稿重新接回主路径
+- 认证和消息业务都已经归并进 `repository/service`
+- `transport/http` 不再承载消息业务规则，只负责 HTTP / WebSocket 输入输出
+- `storage` 只保留数据库连接初始化这类基础设施代码
 
 ## 2. 为什么 P2 和 P3 必须分开
 
@@ -132,9 +149,10 @@
 - 基于心跳超时的失活清理
 - `chat.public.send -> chat.public.message`
 - `chat.private.send -> chat.private.message`
+- 文本消息输入约束和错误码映射
 
-所以当前 `P3` 的主要阻塞点，已经不再是“后端有没有实时入口”，
-而是“前端是否把这些实时事件真正消费起来”。
+所以当前 `P3` 的主要阻塞点已经不再是“协议是否能跑”，
+而是补齐更接近端到端的测试，并继续推进文件能力。
 
 这一阶段必须单独拆开的原因是：
 
@@ -170,8 +188,28 @@
 
 适合看什么：
 
-- 当前首屏状态流怎么走
-- 登录、注册、历史加载是如何接起来的
+- 当前 UI 如何消费统一状态层
+- 会话列表、聊天主视图、telemetry 的布局关系
+
+### 前端状态层
+
+- `frontend/src/store/chatStore.ts`
+
+适合看什么：
+
+- 登录、注册、历史加载、会话派生、消息发送状态如何统一管理
+- WebSocket 事件如何进入会话和消息缓存
+- 未读计数、历史 cursor、optimistic message 如何工作
+
+### 前端组件层
+
+- `frontend/src/components/`
+- `frontend/src/hooks/useKeyboardShortcuts.ts`
+
+适合看什么：
+
+- 页面三栏布局下各面板如何拆分
+- 快捷键如何集中注册，避免散落在组件里
 
 ### HTTP client
 
@@ -181,6 +219,14 @@
 
 - `protocol-v2` 的 HTTP 请求是怎么封装的
 - 为什么页面不直接写 `fetch`
+
+### Realtime client
+
+- `frontend/src/realtime/client.ts`
+
+适合看什么：
+
+- WebSocket 自动重连、心跳、事件分发和发送入口如何封装
 
 ### 后端入口
 
@@ -205,13 +251,13 @@
 
 ### 后端消息链路
 
-- `backend-go/internal/transport/http/service.go`
-- `backend-go/internal/storage/message_repo.go`
+- `backend-go/internal/repository/message.go`
+- `backend-go/internal/service/message.go`
 
 适合看什么：
 
-- 为什么消息历史目前仍走一条“先稳定、后归并”的路径
-- 历史分页结果是怎样被组装成 `protocol-v2` 的
+- 消息历史和实时消息怎样共用统一 `Message` 结构
+- 输入约束和 WebSocket 错误语义为什么放在 service 层
 
 ## 5. 当前最容易犯的错误
 
@@ -222,8 +268,8 @@
 
 ## 6. 当前最合理的推进顺序
 
-1. 做好 WebSocket 握手与 `ping/pong`
-2. 接好真实在线状态
-3. 接公共聊天实时事件
-4. 接私聊实时事件
-5. 再接文件与群聊
+1. 前端补齐手动重连、在线用户刷新、会话滚动位置等文本聊天体验
+2. 后端补齐 WebSocket 事件路径测试
+3. 设计并稳定文件上传下载与文件消息事件
+4. 前端接文件消息 UI 与真实上传下载闭环
+5. 再评估群聊协议和持久化
