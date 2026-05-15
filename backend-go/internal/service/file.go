@@ -14,8 +14,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	protocolv2 "github.com/elaine/chatter2/backend-go/internal/protocol/v2"
 	"github.com/elaine/chatter2/backend-go/internal/repository"
+	"github.com/elaine/chatter2/backend-go/internal/repository/sqlcgen"
 	"github.com/elaine/chatter2/backend-go/internal/session"
 )
 
@@ -51,24 +55,39 @@ type FileUploadResult struct {
 	File             protocolv2.FileAttachment
 }
 
+// fileRecord holds the result of a transactional file message insert.
+type fileRecord struct {
+	FileID         int64
+	MessageID      int64
+	SenderID       int64
+	ReceiverID     *int64
+	FileName       string
+	StoredFileName string
+	FileURL        string
+	Size           int64
+	MIMEType       string
+	MD5            string
+	CreatedAt      time.Time
+}
+
 type FileService struct {
-	files       *repository.FileRepository
-	users       *repository.UserRepository
+	pool        *pgxpool.Pool
+	queries     *sqlcgen.Queries
 	sessions    *session.Manager
 	uploadDir   string
 	maxFileSize int64
 }
 
 func NewFileService(
-	files *repository.FileRepository,
-	users *repository.UserRepository,
+	pool *pgxpool.Pool,
+	queries *sqlcgen.Queries,
 	sessions *session.Manager,
 	uploadDir string,
 	maxFileSize int64,
 ) *FileService {
 	return &FileService{
-		files:       files,
-		users:       users,
+		pool:        pool,
+		queries:     queries,
 		sessions:    sessions,
 		uploadDir:   uploadDir,
 		maxFileSize: maxFileSize,
@@ -166,9 +185,12 @@ func (s *FileService) SaveUpload(ctx context.Context, in FileUploadInput) (*File
 }
 
 func (s *FileService) GetDownload(ctx context.Context, requesterUserID int64, fileID int64) (*FileDownload, error) {
-	record, err := s.files.GetByID(ctx, fileID)
+	record, err := s.queries.GetFileByID(ctx, fileID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, repository.ErrNotFound
+	}
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get file: %w", err)
 	}
 
 	if record.ReceiverID != nil && requesterUserID != record.SenderID && requesterUserID != *record.ReceiverID {
@@ -179,28 +201,138 @@ func (s *FileService) GetDownload(ctx context.Context, requesterUserID int64, fi
 		FileID:         record.FileID,
 		FileName:       record.FileName,
 		StoredFileName: record.StoredFileName,
-		Size:           record.Size,
-		MIMEType:       record.MIMEType,
+		Size:           record.FileSize,
+		MIMEType:       optionalString(record.FileType),
 		Path:           filepath.Join(s.uploadDir, record.StoredFileName),
 	}, nil
 }
 
-func (s *FileService) createFileMessage(ctx context.Context, in FileUploadInput, fileName, storedFileName, fileURL, mimeType string, written int64, md5Hex string) (*repository.FileRecord, string, error) {
+func (s *FileService) createFileMessage(ctx context.Context, in FileUploadInput, fileName, storedFileName, fileURL, mimeType string, written int64, md5Hex string) (*fileRecord, string, error) {
 	content := fileName
 	receiverUsername := strings.TrimSpace(in.ReceiverUsername)
+
 	if receiverUsername == "" {
-		record, err := s.files.CreatePublicFileMessage(ctx, in.SenderID, content, fileName, storedFileName, fileURL, written, mimeType, md5Hex)
-		return record, "", err
+		tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
+		if err != nil {
+			return nil, "", fmt.Errorf("begin tx: %w", err)
+		}
+		defer func() {
+			if err != nil {
+				_ = tx.Rollback(ctx)
+			}
+		}()
+
+		q := s.queries.WithTx(tx)
+
+		msgRow, insErr := q.InsertPublicMessage(ctx, sqlcgen.InsertPublicMessageParams{
+			SenderID:    in.SenderID,
+			MessageType: 1,
+			Content:     content,
+		})
+		if insErr != nil {
+			err = insErr
+			return nil, "", fmt.Errorf("insert public file message: %w", insErr)
+		}
+
+		fileID, insErr := q.InsertFile(ctx, sqlcgen.InsertFileParams{
+			MessageID:      msgRow.MessageID,
+			FileName:       fileName,
+			StoredFileName: storedFileName,
+			FileUrl:        fileURL,
+			FileSize:       written,
+			FileType:       &mimeType,
+			Md5:            &md5Hex,
+		})
+		if insErr != nil {
+			err = insErr
+			return nil, "", fmt.Errorf("insert file: %w", insErr)
+		}
+
+		if commitErr := tx.Commit(ctx); commitErr != nil {
+			err = commitErr
+			return nil, "", fmt.Errorf("commit file tx: %w", commitErr)
+		}
+
+		return &fileRecord{
+			FileID:         fileID,
+			MessageID:      msgRow.MessageID,
+			SenderID:       in.SenderID,
+			FileName:       fileName,
+			StoredFileName: storedFileName,
+			FileURL:        fileURL,
+			Size:           written,
+			MIMEType:       mimeType,
+			MD5:            md5Hex,
+			CreatedAt:      msgRow.CreatedAt.Time,
+		}, "", nil
 	}
+
 	if receiverUsername == in.SenderUsername {
 		return nil, "", ErrCannotMessageSelf
 	}
-	receiver, err := s.users.GetByUsername(ctx, receiverUsername)
-	if err != nil {
-		return nil, "", err
+	receiver, lookupErr := s.queries.GetUserByUsername(ctx, receiverUsername)
+	if lookupErr != nil {
+		if errors.Is(lookupErr, pgx.ErrNoRows) {
+			return nil, "", repository.ErrNotFound
+		}
+		return nil, "", lookupErr
 	}
-	record, err := s.files.CreatePrivateFileMessage(ctx, in.SenderID, receiver.UserID, content, fileName, storedFileName, fileURL, written, mimeType, md5Hex)
-	return record, receiver.Username, err
+
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return nil, "", fmt.Errorf("begin tx: %w", err)
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback(ctx)
+		}
+	}()
+
+	q := s.queries.WithTx(tx)
+
+	msgRow, insErr := q.InsertPrivateMessage(ctx, sqlcgen.InsertPrivateMessageParams{
+		SenderID:    in.SenderID,
+		ReceiverID:  &receiver.UserID,
+		MessageType: 1,
+		Content:     content,
+	})
+	if insErr != nil {
+		err = insErr
+		return nil, "", fmt.Errorf("insert private file message: %w", insErr)
+	}
+
+	fileID, insErr := q.InsertFile(ctx, sqlcgen.InsertFileParams{
+		MessageID:      msgRow.MessageID,
+		FileName:       fileName,
+		StoredFileName: storedFileName,
+		FileUrl:        fileURL,
+		FileSize:       written,
+		FileType:       &mimeType,
+		Md5:            &md5Hex,
+	})
+	if insErr != nil {
+		err = insErr
+		return nil, "", fmt.Errorf("insert file: %w", insErr)
+	}
+
+	if commitErr := tx.Commit(ctx); commitErr != nil {
+		err = commitErr
+		return nil, "", fmt.Errorf("commit file tx: %w", commitErr)
+	}
+
+	return &fileRecord{
+		FileID:         fileID,
+		MessageID:      msgRow.MessageID,
+		SenderID:       in.SenderID,
+		ReceiverID:     &receiver.UserID,
+		FileName:       fileName,
+		StoredFileName: storedFileName,
+		FileURL:        fileURL,
+		Size:           written,
+		MIMEType:       mimeType,
+		MD5:            md5Hex,
+		CreatedAt:      msgRow.CreatedAt.Time,
+	}, receiver.Username, nil
 }
 
 func generateStoredFileName(fileName string) string {

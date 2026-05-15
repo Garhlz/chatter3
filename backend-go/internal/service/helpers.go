@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	protocolv2 "github.com/elaine/chatter2/backend-go/internal/protocol/v2"
-	"github.com/elaine/chatter2/backend-go/internal/repository"
+	"github.com/elaine/chatter2/backend-go/internal/repository/sqlcgen"
 )
 
 func normalizeTextContent(content string) (string, error) {
@@ -45,16 +45,30 @@ func msgTypeToString(t int16) string {
 	return "text"
 }
 
-func toProtocolFile(file repository.MessageFile) *protocolv2.FileAttachment {
-	if !file.FileID.Valid {
+func toProtocolFile(f sqlcgen.FileAttacher) *protocolv2.FileAttachment {
+	if f.GetFileID() == nil {
 		return nil
 	}
 	return &protocolv2.FileAttachment{
-		FileID:         file.FileID.Int64,
-		FileName:       file.FileName.String,
-		StoredFileName: file.StoredFileName.String,
-		DownloadURL:    fmt.Sprintf("/api/v2/files/%d", file.FileID.Int64),
-		Size:           file.FileSize.Int64,
-		MIMEType:       file.MIMEType.String,
+		FileID:         *f.GetFileID(),
+		FileName:       optionalString(f.GetFileName()),
+		StoredFileName: optionalString(f.GetStoredFileName()),
+		DownloadURL:    fmt.Sprintf("/api/v2/files/%d", *f.GetFileID()),
+		Size:           optionalInt64(f.GetFileSize()),
+		MIMEType:       optionalString(f.GetFileType()),
 	}
+}
+
+func optionalString(v *string) string {
+	if v == nil {
+		return ""
+	}
+	return *v
+}
+
+func optionalInt64(v *int64) int64 {
+	if v == nil {
+		return 0
+	}
+	return *v
 }

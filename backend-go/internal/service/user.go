@@ -12,9 +12,12 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/jackc/pgconn"
+	"github.com/jackc/pgx/v5"
+
 	"github.com/elaine/chatter2/backend-go/internal/auth"
 	protocolv2 "github.com/elaine/chatter2/backend-go/internal/protocol/v2"
-	"github.com/elaine/chatter2/backend-go/internal/repository"
+	"github.com/elaine/chatter2/backend-go/internal/repository/sqlcgen"
 )
 
 var (
@@ -28,21 +31,20 @@ var (
 
 // UserService handles user-related business logic.
 type UserService struct {
-	userRepo *repository.UserRepository
-	jwtSvc   *auth.JWTService
+	queries *sqlcgen.Queries
+	jwtSvc  *auth.JWTService
 }
 
 // NewUserService creates a new user service.
-func NewUserService(userRepo *repository.UserRepository, jwtSvc *auth.JWTService) *UserService {
+func NewUserService(queries *sqlcgen.Queries, jwtSvc *auth.JWTService) *UserService {
 	return &UserService{
-		userRepo: userRepo,
-		jwtSvc:   jwtSvc,
+		queries: queries,
+		jwtSvc:  jwtSvc,
 	}
 }
 
 // Register creates a new user account with the given credentials.
 func (s *UserService) Register(ctx context.Context, username, password, nickname string) (*protocolv2.User, error) {
-	// 这里保留最小业务约束，避免把“HTTP 能过但业务不合法”的输入直接打进数据库。
 	if username == "" || password == "" {
 		return nil, fmt.Errorf("username and password are required")
 	}
@@ -53,7 +55,7 @@ func (s *UserService) Register(ctx context.Context, username, password, nickname
 		return nil, fmt.Errorf("username must be 50 characters or fewer")
 	}
 
-	exists, err := s.userRepo.ExistsByUsername(ctx, username)
+	exists, err := s.queries.ExistsByUsername(ctx, username)
 	if err != nil {
 		return nil, fmt.Errorf("failed to check username: %w", err)
 	}
@@ -66,9 +68,14 @@ func (s *UserService) Register(ctx context.Context, username, password, nickname
 		return nil, fmt.Errorf("failed to hash password: %w", err)
 	}
 
-	userID, err := s.userRepo.Create(ctx, username, passwordHash, nickname)
+	userID, err := s.queries.CreateUser(ctx, sqlcgen.CreateUserParams{
+		Username: username,
+		Password: passwordHash,
+		Nickname: nickname,
+	})
 	if err != nil {
-		if errors.Is(err, repository.ErrUsernameTaken) {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 			return nil, ErrUsernameTaken
 		}
 		return nil, fmt.Errorf("failed to create user: %w", err)
@@ -84,8 +91,8 @@ func (s *UserService) Register(ctx context.Context, username, password, nickname
 
 // Login verifies user credentials and returns a JWT token.
 func (s *UserService) Login(ctx context.Context, username, password string) (string, *protocolv2.User, error) {
-	dbUser, err := s.userRepo.GetByUsername(ctx, username)
-	if errors.Is(err, repository.ErrNotFound) {
+	dbUser, err := s.queries.GetUserByUsername(ctx, username)
+	if errors.Is(err, pgx.ErrNoRows) {
 		return "", nil, ErrInvalidCredentials
 	}
 	if err != nil {
@@ -97,7 +104,7 @@ func (s *UserService) Login(ctx context.Context, username, password string) (str
 	}
 
 	// best-effort：不让统计字段影响登录主流程。
-	_ = s.userRepo.UpdateLastLogin(ctx, dbUser.Username)
+	_ = s.queries.UpdateLastLogin(ctx, dbUser.Username)
 
 	token, err := s.jwtSvc.Sign(dbUser.UserID, dbUser.Username, dbUser.Nickname)
 	if err != nil {

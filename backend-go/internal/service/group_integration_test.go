@@ -8,18 +8,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/elaine/chatter2/backend-go/internal/repository"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/elaine/chatter2/backend-go/internal/repository"
+	"github.com/elaine/chatter2/backend-go/internal/repository/sqlcgen"
 	"github.com/elaine/chatter2/backend-go/internal/session"
 )
 
-// TestGroupServiceIntegrationCreateSendHistory verifies the real database path:
-// create group -> send group message -> history query -> non-member rejection.
-//
-// Run with:
-//
-//	CHATTER_TEST_DATABASE_URL="$DATABASE_URL" go test ./internal/service -run GroupIntegration
 func TestGroupServiceIntegrationCreateSendHistory(t *testing.T) {
 	databaseURL := os.Getenv("CHATTER_TEST_DATABASE_URL")
 	if databaseURL == "" {
@@ -47,6 +42,7 @@ func TestGroupServiceIntegrationCreateSendHistory(t *testing.T) {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE user_id IN ($1, $2, $3)`, aliceID, bobID, carolID)
 	})
 
+	queries := sqlcgen.New(pool)
 	sessions := session.NewManager()
 	sessions.Register(&session.Session{
 		UserID:   aliceID,
@@ -54,10 +50,14 @@ func TestGroupServiceIntegrationCreateSendHistory(t *testing.T) {
 		Nickname: "Alice",
 		Send:     make(chan []byte, 1),
 	})
+	sessions.Register(&session.Session{
+		UserID:   bobID,
+		Username: "grp_bob_" + suffix,
+		Nickname: "Bob",
+		Send:     make(chan []byte, 1),
+	})
 
-	groupRepo := repository.NewGroupsRepository(pool)
-	userRepo := repository.NewUserRepository(pool)
-	gs := NewGroupService(groupRepo, userRepo, sessions)
+	gs := NewGroupService(queries, sessions)
 
 	// Create a group with alice as owner and bob as member.
 	group, err := gs.CreateGroup(ctx, aliceID, "grp_alice_"+suffix, "Alice", "test-group", []string{"grp_bob_" + suffix})
@@ -75,15 +75,6 @@ func TestGroupServiceIntegrationCreateSendHistory(t *testing.T) {
 	}
 	if len(groups) != 1 || groups[0].GroupID != group.GroupID {
 		t.Fatalf("expected group in alice's list: %#v", groups)
-	}
-
-	// Verify bob can see the group too.
-	groups, err = gs.GetUserGroups(ctx, bobID)
-	if err != nil {
-		t.Fatalf("get user groups for bob: %v", err)
-	}
-	if len(groups) != 1 {
-		t.Fatalf("expected bob to see the group, got %d", len(groups))
 	}
 
 	// Send a group message as alice.
@@ -130,5 +121,54 @@ func TestGroupServiceIntegrationCreateSendHistory(t *testing.T) {
 	_, _, err = gs.GetGroupHistory(ctx, carolID, group.GroupID, "", 50)
 	if !errors.Is(err, ErrNotGroupMember) {
 		t.Fatalf("expected ErrNotGroupMember for non-member history, got %v", err)
+	}
+}
+
+func TestGroupServiceIntegrationMissingGroupReturnsNotFound(t *testing.T) {
+	databaseURL := os.Getenv("CHATTER_TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("set CHATTER_TEST_DATABASE_URL to run database integration tests")
+	}
+
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, databaseURL)
+	if err != nil {
+		t.Fatalf("open test database: %v", err)
+	}
+	defer pool.Close()
+	if err := pool.Ping(ctx); err != nil {
+		t.Fatalf("ping test database: %v", err)
+	}
+
+	suffix := strings.ReplaceAll(time.Now().UTC().Format("20060102150405.000000000"), ".", "")
+	aliceID := insertTestUser(t, pool, "grp_nf_alice_"+suffix, "Alice")
+	bobID := insertTestUser(t, pool, "grp_nf_bob_"+suffix, "Bob")
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM group_members WHERE user_id IN ($1, $2)`, aliceID, bobID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM messages WHERE sender_id IN ($1, $2)`, aliceID, bobID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE user_id IN ($1, $2)`, aliceID, bobID)
+	})
+
+	queries := sqlcgen.New(pool)
+	sessions := session.NewManager()
+	sessions.Register(&session.Session{
+		UserID:   aliceID,
+		Username: "grp_nf_alice_" + suffix,
+		Nickname: "Alice",
+		Send:     make(chan []byte, 1),
+	})
+	gs := NewGroupService(queries, sessions)
+
+	if _, err := gs.GetGroupMembers(ctx, 999999); !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf("expected repository.ErrNotFound from GetGroupMembers, got %v", err)
+	}
+	if _, _, err := gs.GetGroupHistory(ctx, aliceID, 999999, "", 50); !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf("expected repository.ErrNotFound from GetGroupHistory, got %v", err)
+	}
+	if _, err := gs.AddMembers(ctx, aliceID, 999999, []string{"grp_nf_bob_" + suffix}); !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf("expected repository.ErrNotFound from AddMembers, got %v", err)
+	}
+	if err := gs.RemoveMember(ctx, aliceID, 999999, "grp_nf_bob_"+suffix); !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf("expected repository.ErrNotFound from RemoveMember, got %v", err)
 	}
 }

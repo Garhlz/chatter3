@@ -34,6 +34,7 @@ import (
 	"github.com/elaine/chatter2/backend-go/internal/config"
 	protocolv2 "github.com/elaine/chatter2/backend-go/internal/protocol/v2"
 	"github.com/elaine/chatter2/backend-go/internal/repository"
+	"github.com/elaine/chatter2/backend-go/internal/repository/sqlcgen"
 	appsvc "github.com/elaine/chatter2/backend-go/internal/service"
 	"github.com/elaine/chatter2/backend-go/internal/session"
 )
@@ -73,15 +74,12 @@ func NewServer(
 	// 因为它能直接降低后续接 WebSocket 时的改造成本。
 	jwtSvc := auth.NewJWTService(cfg.JWTSecret, cfg.JWTExpiration)
 
-	userRepo := repository.NewUserRepository(pool)
-	msgRepo := repository.NewMessageRepository(pool)
-	fileRepo := repository.NewFileRepository(pool)
-	groupRepo := repository.NewGroupsRepository(pool)
+	queries := sqlcgen.New(pool)
 
-	userSvc := appsvc.NewUserService(userRepo, jwtSvc)
-	msgSvc := appsvc.NewMessageService(msgRepo, sessions, userRepo)
-	fileSvc := appsvc.NewFileService(fileRepo, userRepo, sessions, cfg.UploadDir, cfg.MaxFileSize)
-	groupSvc := appsvc.NewGroupService(groupRepo, userRepo, sessions)
+	userSvc := appsvc.NewUserService(queries, jwtSvc)
+	msgSvc := appsvc.NewMessageService(queries, sessions)
+	fileSvc := appsvc.NewFileService(pool, queries, sessions, cfg.UploadDir, cfg.MaxFileSize)
+	groupSvc := appsvc.NewGroupService(queries, sessions)
 
 	s := &Server{
 		cfg:      cfg,

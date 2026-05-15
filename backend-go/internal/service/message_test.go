@@ -4,6 +4,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/elaine/chatter2/backend-go/internal/repository/sqlcgen"
 )
 
 func TestNormalizeTextContent(t *testing.T) {
@@ -39,5 +41,23 @@ func TestParseCursor(t *testing.T) {
 	}
 	if _, err := parseCursor("-1"); !errors.Is(err, ErrInvalidCursor) {
 		t.Fatalf("expected ErrInvalidCursor for negative cursor, got %v", err)
+	}
+}
+
+func TestToProtocolFileAllowsNullableMetadata(t *testing.T) {
+	fileID := int64(7)
+	row := sqlcgen.GetPublicHistoryRow{
+		FileID: &fileID,
+	}
+
+	got := toProtocolFile(row)
+	if got == nil {
+		t.Fatal("expected file attachment, got nil")
+	}
+	if got.FileID != 7 {
+		t.Fatalf("expected file id 7, got %d", got.FileID)
+	}
+	if got.FileName != "" || got.StoredFileName != "" || got.MIMEType != "" || got.Size != 0 {
+		t.Fatalf("expected zero values for nil metadata, got %#v", got)
 	}
 }

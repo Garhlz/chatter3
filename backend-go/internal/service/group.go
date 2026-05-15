@@ -6,8 +6,11 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/jackc/pgx/v5"
+
 	protocolv2 "github.com/elaine/chatter2/backend-go/internal/protocol/v2"
 	"github.com/elaine/chatter2/backend-go/internal/repository"
+	"github.com/elaine/chatter2/backend-go/internal/repository/sqlcgen"
 	"github.com/elaine/chatter2/backend-go/internal/session"
 )
 
@@ -24,17 +27,15 @@ var (
 
 // GroupService owns group and group-message business rules.
 type GroupService struct {
-	groups   *repository.GroupsRepository
-	users    *repository.UserRepository
+	queries  *sqlcgen.Queries
 	sessions *session.Manager
 }
 
 func NewGroupService(
-	groups *repository.GroupsRepository,
-	users *repository.UserRepository,
+	queries *sqlcgen.Queries,
 	sessions *session.Manager,
 ) *GroupService {
-	return &GroupService{groups: groups, users: users, sessions: sessions}
+	return &GroupService{queries: queries, sessions: sessions}
 }
 
 // CreateGroup inserts a group, makes the creator owner, and optionally adds initial members.
@@ -47,12 +48,19 @@ func (s *GroupService) CreateGroup(ctx context.Context, creatorUserID int64, cre
 		return nil, ErrGroupNameTooLong
 	}
 
-	row, err := s.groups.CreateGroup(ctx, groupName, creatorUserID)
+	row, err := s.queries.CreateGroup(ctx, sqlcgen.CreateGroupParams{
+		GroupName: groupName,
+		CreatorID: creatorUserID,
+	})
 	if err != nil {
 		return nil, err
 	}
 
-	if err := s.groups.AddMember(ctx, row.GroupID, creatorUserID, 2); err != nil {
+	if err := s.queries.AddGroupMember(ctx, sqlcgen.AddGroupMemberParams{
+		GroupID: row.GroupID,
+		UserID:  creatorUserID,
+		Role:    2,
+	}); err != nil {
 		return nil, err
 	}
 
@@ -62,14 +70,18 @@ func (s *GroupService) CreateGroup(ctx context.Context, creatorUserID int64, cre
 		if uname == "" || uname == creatorUsername {
 			continue
 		}
-		u, err := s.users.GetByUsername(ctx, uname)
-		if errors.Is(err, repository.ErrNotFound) {
+		u, err := s.queries.GetUserByUsername(ctx, uname)
+		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrMemberNotFound
 		}
 		if err != nil {
 			return nil, err
 		}
-		if err := s.groups.AddMember(ctx, row.GroupID, u.UserID, 0); err != nil {
+		if err := s.queries.AddGroupMember(ctx, sqlcgen.AddGroupMemberParams{
+			GroupID: row.GroupID,
+			UserID:  u.UserID,
+			Role:    0,
+		}); err != nil {
 			return nil, err
 		}
 		memberCount++
@@ -85,20 +97,20 @@ func (s *GroupService) CreateGroup(ctx context.Context, creatorUserID int64, cre
 			Online:   s.sessions.IsOnline(creatorUsername),
 		},
 		MemberCount: memberCount,
-		CreatedAt:   row.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
+		CreatedAt:   row.CreatedAt.Time.UTC().Format("2006-01-02T15:04:05Z"),
 	}, nil
 }
 
 // GetUserGroups returns the groups a user belongs to.
 func (s *GroupService) GetUserGroups(ctx context.Context, userID int64) ([]protocolv2.Group, error) {
-	rows, err := s.groups.GetUserGroups(ctx, userID)
+	rows, err := s.queries.GetUserGroups(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
 
 	groups := make([]protocolv2.Group, 0, len(rows))
 	for _, r := range rows {
-		members, err := s.groups.GetGroupMembers(ctx, r.GroupID)
+		members, err := s.queries.GetGroupMembers(ctx, r.GroupID)
 		if err != nil {
 			return nil, err
 		}
@@ -107,12 +119,12 @@ func (s *GroupService) GetUserGroups(ctx context.Context, userID int64) ([]proto
 			GroupName: r.GroupName,
 			Creator: protocolv2.User{
 				UserID:   r.CreatorID,
-				Username: r.CreatorUsername,
-				Nickname: r.CreatorNickname,
-				Online:   s.sessions.IsOnline(r.CreatorUsername),
+				Username: r.Username,
+				Nickname: r.Nickname,
+				Online:   s.sessions.IsOnline(r.Username),
 			},
 			MemberCount: len(members),
-			CreatedAt:   r.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
+			CreatedAt:   r.CreatedAt.Time.UTC().Format("2006-01-02T15:04:05Z"),
 		})
 	}
 	return groups, nil
@@ -120,11 +132,14 @@ func (s *GroupService) GetUserGroups(ctx context.Context, userID int64) ([]proto
 
 // GetGroupByID returns a single group by ID.
 func (s *GroupService) GetGroupByID(ctx context.Context, groupID int64) (*protocolv2.Group, error) {
-	row, err := s.groups.GetGroupByID(ctx, groupID)
+	row, err := s.queries.GetGroupByID(ctx, groupID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, repository.ErrNotFound
+	}
 	if err != nil {
 		return nil, err
 	}
-	members, err := s.groups.GetGroupMembers(ctx, groupID)
+	members, err := s.queries.GetGroupMembers(ctx, groupID)
 	if err != nil {
 		return nil, err
 	}
@@ -133,18 +148,22 @@ func (s *GroupService) GetGroupByID(ctx context.Context, groupID int64) (*protoc
 		GroupName: row.GroupName,
 		Creator: protocolv2.User{
 			UserID:   row.CreatorID,
-			Username: row.CreatorUsername,
-			Nickname: row.CreatorNickname,
-			Online:   s.sessions.IsOnline(row.CreatorUsername),
+			Username: row.Username,
+			Nickname: row.Nickname,
+			Online:   s.sessions.IsOnline(row.Username),
 		},
 		MemberCount: len(members),
-		CreatedAt:   row.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
+		CreatedAt:   row.CreatedAt.Time.UTC().Format("2006-01-02T15:04:05Z"),
 	}, nil
 }
 
 // GetGroupMembers returns the member list for a group.
 func (s *GroupService) GetGroupMembers(ctx context.Context, groupID int64) ([]protocolv2.GroupMember, error) {
-	rows, err := s.groups.GetGroupMembers(ctx, groupID)
+	if err := s.ensureGroupExists(ctx, groupID); err != nil {
+		return nil, err
+	}
+
+	rows, err := s.queries.GetGroupMembers(ctx, groupID)
 	if err != nil {
 		return nil, err
 	}
@@ -158,7 +177,7 @@ func (s *GroupService) GetGroupMembers(ctx context.Context, groupID int64) ([]pr
 				Online:   s.sessions.IsOnline(r.Username),
 			},
 			Role:     r.Role,
-			JoinedAt: r.JoinedAt.UTC().Format("2006-01-02T15:04:05Z"),
+			JoinedAt: r.JoinedAt.Time.UTC().Format("2006-01-02T15:04:05Z"),
 		})
 	}
 	return members, nil
@@ -171,24 +190,35 @@ func (s *GroupService) SendGroupMessage(ctx context.Context, sender *session.Ses
 		return nil, nil, err
 	}
 
-	if _, err := s.groups.GetGroupByID(ctx, groupID); err != nil {
+	if _, err := s.queries.GetGroupByID(ctx, groupID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil, repository.ErrNotFound
+		}
 		return nil, nil, err
 	}
 
-	isMember, err := s.groups.IsMember(ctx, groupID, sender.UserID)
+	count, err := s.queries.IsGroupMember(ctx, sqlcgen.IsGroupMemberParams{
+		GroupID: groupID,
+		UserID:  sender.UserID,
+	})
 	if err != nil {
 		return nil, nil, err
 	}
-	if !isMember {
+	if count == 0 {
 		return nil, nil, ErrNotGroupMember
 	}
 
-	row, err := s.groups.InsertGroupMessage(ctx, sender.UserID, groupID, 0, content)
+	row, err := s.queries.InsertGroupMessage(ctx, sqlcgen.InsertGroupMessageParams{
+		SenderID:    sender.UserID,
+		GroupID:     &groupID,
+		MessageType: 0,
+		Content:     content,
+	})
 	if err != nil {
 		return nil, nil, err
 	}
 
-	usernames, err := s.groups.GetMemberUsernames(ctx, groupID)
+	usernames, err := s.queries.GetMemberUsernames(ctx, groupID)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -205,17 +235,24 @@ func (s *GroupService) SendGroupMessage(ctx context.Context, sender *session.Ses
 		GroupID:     groupID,
 		ContentType: "text",
 		Content:     content,
-		Timestamp:   row.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
+		Timestamp:   row.CreatedAt.Time.UTC().Format("2006-01-02T15:04:05Z"),
 	}, usernames, nil
 }
 
 // GetGroupHistory returns cursor-paginated group message history.
 func (s *GroupService) GetGroupHistory(ctx context.Context, userID, groupID int64, cursorStr string, limit int) ([]protocolv2.Message, string, error) {
-	isMember, err := s.groups.IsMember(ctx, groupID, userID)
+	if err := s.ensureGroupExists(ctx, groupID); err != nil {
+		return nil, "", err
+	}
+
+	count, err := s.queries.IsGroupMember(ctx, sqlcgen.IsGroupMemberParams{
+		GroupID: groupID,
+		UserID:  userID,
+	})
 	if err != nil {
 		return nil, "", err
 	}
-	if !isMember {
+	if count == 0 {
 		return nil, "", ErrNotGroupMember
 	}
 
@@ -225,7 +262,11 @@ func (s *GroupService) GetGroupHistory(ctx context.Context, userID, groupID int6
 		return nil, "", err
 	}
 
-	rows, err := s.groups.GetGroupHistory(ctx, groupID, beforeID, limit)
+	rows, err := s.queries.GetGroupHistory(ctx, sqlcgen.GetGroupHistoryParams{
+		GroupID:  &groupID,
+		BeforeID: beforeID,
+		Limit:    int32(limit),
+	})
 	if err != nil {
 		return nil, "", err
 	}
@@ -245,8 +286,8 @@ func (s *GroupService) GetGroupHistory(ctx context.Context, userID, groupID int6
 			GroupID:     groupID,
 			ContentType: msgTypeToString(r.MessageType),
 			Content:     r.Content,
-			File:        toProtocolFile(r.File),
-			Timestamp:   r.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
+			File:        toProtocolFile(r),
+			Timestamp:   r.CreatedAt.Time.UTC().Format("2006-01-02T15:04:05Z"),
 		})
 	}
 
@@ -259,7 +300,17 @@ func (s *GroupService) GetGroupHistory(ctx context.Context, userID, groupID int6
 
 // AddMembers adds users to a group. Caller must be admin or owner.
 func (s *GroupService) AddMembers(ctx context.Context, callerUserID, groupID int64, usernames []string) ([]protocolv2.GroupMember, error) {
-	role, err := s.groups.GetMemberRole(ctx, groupID, callerUserID)
+	if err := s.ensureGroupExists(ctx, groupID); err != nil {
+		return nil, err
+	}
+
+	role, err := s.queries.GetMemberRole(ctx, sqlcgen.GetMemberRoleParams{
+		GroupID: groupID,
+		UserID:  callerUserID,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrNotGroupAdmin
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -272,14 +323,18 @@ func (s *GroupService) AddMembers(ctx context.Context, callerUserID, groupID int
 		if uname == "" {
 			continue
 		}
-		u, err := s.users.GetByUsername(ctx, uname)
-		if errors.Is(err, repository.ErrNotFound) {
+		u, err := s.queries.GetUserByUsername(ctx, uname)
+		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrMemberNotFound
 		}
 		if err != nil {
 			return nil, err
 		}
-		if err := s.groups.AddMember(ctx, groupID, u.UserID, 0); err != nil {
+		if err := s.queries.AddGroupMember(ctx, sqlcgen.AddGroupMemberParams{
+			GroupID: groupID,
+			UserID:  u.UserID,
+			Role:    0,
+		}); err != nil {
 			return nil, err
 		}
 	}
@@ -289,13 +344,26 @@ func (s *GroupService) AddMembers(ctx context.Context, callerUserID, groupID int
 
 // RemoveMember removes a user from a group. Caller must be admin/owner, or the user themselves.
 func (s *GroupService) RemoveMember(ctx context.Context, callerUserID, groupID int64, targetUsername string) error {
-	target, err := s.users.GetByUsername(ctx, targetUsername)
+	if err := s.ensureGroupExists(ctx, groupID); err != nil {
+		return err
+	}
+
+	target, err := s.queries.GetUserByUsername(ctx, targetUsername)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return repository.ErrNotFound
+	}
 	if err != nil {
 		return err
 	}
 
 	if callerUserID != target.UserID {
-		callerRole, err := s.groups.GetMemberRole(ctx, groupID, callerUserID)
+		callerRole, err := s.queries.GetMemberRole(ctx, sqlcgen.GetMemberRoleParams{
+			GroupID: groupID,
+			UserID:  callerUserID,
+		})
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotGroupAdmin
+		}
 		if err != nil {
 			return err
 		}
@@ -304,8 +372,11 @@ func (s *GroupService) RemoveMember(ctx context.Context, callerUserID, groupID i
 		}
 	}
 
-	targetRole, err := s.groups.GetMemberRole(ctx, groupID, target.UserID)
-	if errors.Is(err, repository.ErrNotFound) {
+	targetRole, err := s.queries.GetMemberRole(ctx, sqlcgen.GetMemberRoleParams{
+		GroupID: groupID,
+		UserID:  target.UserID,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrMemberNotFound
 	}
 	if err != nil {
@@ -315,5 +386,16 @@ func (s *GroupService) RemoveMember(ctx context.Context, callerUserID, groupID i
 		return ErrCannotRemoveOwner
 	}
 
-	return s.groups.RemoveMember(ctx, groupID, target.UserID)
+	return s.queries.RemoveGroupMember(ctx, sqlcgen.RemoveGroupMemberParams{
+		GroupID: groupID,
+		UserID:  target.UserID,
+	})
+}
+
+func (s *GroupService) ensureGroupExists(ctx context.Context, groupID int64) error {
+	_, err := s.queries.GetGroupByID(ctx, groupID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return repository.ErrNotFound
+	}
+	return err
 }
