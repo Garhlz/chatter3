@@ -45,6 +45,13 @@ export function createAPIClient(baseURL: string) {
       body: body ? JSON.stringify(body) : undefined,
     });
 
+    if (response.status === 204) {
+      if (!response.ok) {
+        throw new APIClientError(`HTTP ${response.status}`, `http_${response.status}`, response.status);
+      }
+      return undefined as TResponse;
+    }
+
     const data = (await response.json()) as
       | APIResponse<TResponse>
       | APIErrorResponse;
