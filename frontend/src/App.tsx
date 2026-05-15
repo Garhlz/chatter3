@@ -12,8 +12,13 @@ export function App() {
   const currentUser = useChatStore((state) => state.currentUser);
   const status = useChatStore((state) => state.status);
   const disconnect = useChatStore((state) => state.disconnect);
+  const bootstrapSession = useChatStore((state) => state.bootstrapSession);
 
   useKeyboardShortcuts();
+
+  useEffect(() => {
+    void bootstrapSession();
+  }, [bootstrapSession]);
 
   useEffect(() => {
     return () => {

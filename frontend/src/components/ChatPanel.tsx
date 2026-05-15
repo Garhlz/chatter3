@@ -1,6 +1,5 @@
 import { useRef } from "react";
 import { useShallow } from "zustand/shallow";
-import { open } from "@tauri-apps/plugin-dialog";
 import { Composer } from "./Composer";
 import { GroupPanel } from "./GroupPanel";
 import { MessageList } from "./MessageList";
@@ -23,7 +22,6 @@ export function ChatPanel() {
   const messages = useChatStore(useShallow(selectActiveMessages));
   const activeConversation = useChatStore(useShallow(selectActiveConversation));
   const activeStats = useChatStore(useShallow(selectActiveStats));
-  const setLastSelectedFile = useChatStore((state) => state.setLastSelectedFile);
   const loadOlderHistory = useChatStore((state) => state.loadOlderHistory);
   const reloadActiveHistory = useChatStore((state) => state.reloadActiveHistory);
   const uploadFile = useChatStore((state) => state.uploadFile);
@@ -47,20 +45,11 @@ export function ChatPanel() {
     }
   }
 
-  // Tauri desktop 文件选择与上传
-  async function handleTauriFilePick() {
-    const selected = await open({ multiple: false });
-    if (typeof selected === "string") {
-      setLastSelectedFile(selected);
-    }
-  }
-
-  async function handlePickFile() {
-    try {
-      await handleTauriFilePick();
-    } catch {
-      handleBrowserFilePick();
-    }
+  function handlePickFile() {
+    // 真实上传仍然依赖浏览器 File 对象。
+    // 之前 Tauri 分支只拿到了本地路径字符串，界面看起来像“已选择”，但实际上无法上传。
+    // 在补齐原生文件读取桥接前，统一回到 input[type=file] 是更可靠的行为。
+    handleBrowserFilePick();
   }
 
   const historyScopeLabel =
@@ -130,7 +119,7 @@ export function ChatPanel() {
             type="button"
             className="secondary-button compact-button"
             disabled={!token || uploadingFile}
-            onClick={handlePickFile}
+            onClick={() => handlePickFile()}
           >
             {uploadingFile ? "Uploading..." : "Attach file"}
           </button>
