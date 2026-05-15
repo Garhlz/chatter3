@@ -21,6 +21,22 @@ export function App() {
     };
   }, [disconnect]);
 
+  if (!currentUser) {
+    return (
+      <div className="desktop-shell auth-shell">
+        <header className="topbar auth-topbar">
+          <div>
+            <p className="topbar-eyebrow">Chatter3 // realtime console</p>
+            <h1>Signal Desk</h1>
+          </div>
+        </header>
+        <main className="auth-overlay">
+          <AuthPanel />
+        </main>
+      </div>
+    );
+  }
+
   return (
     <div className="desktop-shell">
       <header className="topbar">
@@ -32,11 +48,7 @@ export function App() {
           <span className={`status-dot status-${status}`} />
           <div>
             <strong>{status.toUpperCase()}</strong>
-            <small>
-              {currentUser
-                ? `operator: ${currentUser.nickname}`
-                : "authentication required"}
-            </small>
+            <small>operator: {currentUser.nickname}</small>
           </div>
         </div>
       </header>
@@ -44,7 +56,6 @@ export function App() {
       <main className="workspace">
         <aside className="control-rail">
           <IdentityPanel />
-          <AuthPanel />
           <TelemetryPanel />
         </aside>
 

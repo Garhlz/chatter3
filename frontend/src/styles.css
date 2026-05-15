@@ -105,6 +105,27 @@ input:focus {
   padding: 20px 0 28px;
 }
 
+.auth-shell {
+  display: flex;
+  flex-direction: column;
+}
+
+.auth-topbar {
+  margin-bottom: 0;
+}
+
+.auth-overlay {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: calc(100vh - 160px);
+}
+
+.auth-overlay .auth-panel {
+  width: min(460px, calc(100vw - 40px));
+}
+
 .topbar {
   display: flex;
   align-items: end;
