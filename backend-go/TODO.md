@@ -4,6 +4,11 @@
 
 ## 当前后端已具备
 
+当前判断：
+
+- 后端核心功能已基本完成
+- 当前进入增强与收尾阶段，而不是继续补主路径缺口
+
 - [x] `POST /api/v2/auth/register`
 - [x] `POST /api/v2/auth/login`
 - [x] `GET /api/v2/users/online`
@@ -44,6 +49,7 @@
 - [x] 实现 `GET /api/v2/files/{fileId}`
 - [x] 文件元数据与历史消息结构对齐
 - [x] 为文件上传下载补错误路径测试：超限、目标用户不存在、越权下载
+- [x] 为群组 HTTP 错误路径补集成测试：缺失群组 404、非成员/非管理员 403
 
 ## Backend Later
 
@@ -52,6 +58,7 @@
 - [x] `internal/config` 单元测试：必填字段、默认值、自定义值
 - [x] `internal/repository` 集成测试：user/message/group CRUD
 - [x] 移除 v1 遗留死代码：`transport/tcp/`、`dispatcher/`、`protocol/codec.go`、`config.TCPPort`
+- [x] 引入 sqlc：手写 repository 迁移为 sqlc 生成代码，21 条查询全部类型安全
 
 ## Backend 产出目标
 
@@ -76,6 +83,10 @@
 - 群组 CRUD、成员管理与群聊历史
 - `chat.group.send -> chat.group.message`
 - `forbidden` 错误码（非成员访问、权限不足）
+- 未知私聊对象、未知私聊文件接收者统一返回 `not_found`
+- 附件历史/下载链路允许 `file_type` 为空并返回空字符串
+- 不存在的群组资源统一返回 `not_found`
+- 非成员/非管理员群组操作统一返回 `forbidden`
 
 当前仍不应视为稳定契约：
 
@@ -86,7 +97,8 @@
 WebSocket `error` 事件当前使用这些稳定 code：
 
 - `bad_request`：JSON 结构错误、空内容、缺少接收者、私聊自己、非法 cursor
-- `not_found`：私聊目标用户不存在
+- `not_found`：私聊目标用户不存在、私聊文件上传目标不存在、目标资源不存在
+- `forbidden`：非成员访问群组历史、非管理员修改群成员、越权下载文件
 - `payload_too_large`：文本消息超过 4096 字符
 - `internal_error`：服务端内部错误，响应不会暴露底层数据库错误
 - `not_implemented`：事件尚未实现

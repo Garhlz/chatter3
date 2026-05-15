@@ -7,3 +7,5 @@ client/build/
 .upload/
 .pgdata/
 backend-go/.env
+backend-go/.cache/
+backend-go/upload_files/

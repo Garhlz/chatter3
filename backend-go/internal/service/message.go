@@ -6,8 +6,11 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/jackc/pgx/v5"
+
 	protocolv2 "github.com/elaine/chatter2/backend-go/internal/protocol/v2"
 	"github.com/elaine/chatter2/backend-go/internal/repository"
+	"github.com/elaine/chatter2/backend-go/internal/repository/sqlcgen"
 	"github.com/elaine/chatter2/backend-go/internal/session"
 )
 
@@ -23,17 +26,15 @@ var (
 
 // MessageService owns message business rules shared by HTTP history and WS send paths.
 type MessageService struct {
-	messages *repository.MessageRepository
+	queries  *sqlcgen.Queries
 	sessions *session.Manager
-	users    *repository.UserRepository
 }
 
 func NewMessageService(
-	messages *repository.MessageRepository,
+	queries *sqlcgen.Queries,
 	sessions *session.Manager,
-	users *repository.UserRepository,
 ) *MessageService {
-	return &MessageService{messages: messages, sessions: sessions, users: users}
+	return &MessageService{queries: queries, sessions: sessions}
 }
 
 // GetPublicHistory returns public messages in chronological display order.
@@ -44,7 +45,10 @@ func (s *MessageService) GetPublicHistory(ctx context.Context, cursorStr string,
 		return nil, "", err
 	}
 
-	rows, err := s.messages.GetPublicHistory(ctx, beforeID, limit)
+	rows, err := s.queries.GetPublicHistory(ctx, sqlcgen.GetPublicHistoryParams{
+		BeforeID: beforeID,
+		Limit:    int32(limit),
+	})
 	if err != nil {
 		return nil, "", err
 	}
@@ -63,8 +67,8 @@ func (s *MessageService) GetPublicHistory(ctx context.Context, cursorStr string,
 			},
 			ContentType: msgTypeToString(r.MessageType),
 			Content:     r.Content,
-			File:        toProtocolFile(r.File),
-			Timestamp:   r.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
+			File:        toProtocolFile(r),
+			Timestamp:   r.CreatedAt.Time.UTC().Format("2006-01-02T15:04:05Z"),
 		})
 	}
 
@@ -82,7 +86,10 @@ func (s *MessageService) GetPrivateHistory(ctx context.Context, currentUserID in
 		return nil, "", ErrReceiverRequired
 	}
 
-	otherUser, err := s.users.GetByUsername(ctx, otherUsername)
+	otherUser, err := s.queries.GetUserByUsername(ctx, otherUsername)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, "", repository.ErrNotFound
+	}
 	if err != nil {
 		return nil, "", err
 	}
@@ -93,7 +100,12 @@ func (s *MessageService) GetPrivateHistory(ctx context.Context, currentUserID in
 		return nil, "", err
 	}
 
-	rows, err := s.messages.GetPrivateHistory(ctx, currentUserID, otherUser.UserID, beforeID, limit)
+	rows, err := s.queries.GetPrivateHistory(ctx, sqlcgen.GetPrivateHistoryParams{
+		UserId1:  currentUserID,
+		UserId2:  &otherUser.UserID,
+		BeforeID: beforeID,
+		Limit:    int32(limit),
+	})
 	if err != nil {
 		return nil, "", err
 	}
@@ -113,8 +125,8 @@ func (s *MessageService) GetPrivateHistory(ctx context.Context, currentUserID in
 			ReceiverUsername: r.ReceiverUsername,
 			ContentType:      msgTypeToString(r.MessageType),
 			Content:          r.Content,
-			File:             toProtocolFile(r.File),
-			Timestamp:        r.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
+			File:             toProtocolFile(r),
+			Timestamp:        r.CreatedAt.Time.UTC().Format("2006-01-02T15:04:05Z"),
 		})
 	}
 
@@ -132,7 +144,11 @@ func (s *MessageService) CreatePublicMessage(ctx context.Context, sender *sessio
 		return nil, err
 	}
 
-	row, err := s.messages.InsertPublicMessage(ctx, sender.UserID, 0, content)
+	row, err := s.queries.InsertPublicMessage(ctx, sqlcgen.InsertPublicMessageParams{
+		SenderID:    sender.UserID,
+		MessageType: 0,
+		Content:     content,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -148,7 +164,7 @@ func (s *MessageService) CreatePublicMessage(ctx context.Context, sender *sessio
 		},
 		ContentType: "text",
 		Content:     content,
-		Timestamp:   row.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
+		Timestamp:   row.CreatedAt.Time.UTC().Format("2006-01-02T15:04:05Z"),
 	}, nil
 }
 
@@ -167,12 +183,20 @@ func (s *MessageService) CreatePrivateMessage(ctx context.Context, sender *sessi
 		return "", nil, err
 	}
 
-	receiver, err := s.users.GetByUsername(ctx, receiverUsername)
+	receiver, err := s.queries.GetUserByUsername(ctx, receiverUsername)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil, repository.ErrNotFound
+	}
 	if err != nil {
 		return "", nil, err
 	}
 
-	row, err := s.messages.InsertPrivateMessage(ctx, sender.UserID, receiver.UserID, 0, content)
+	row, err := s.queries.InsertPrivateMessage(ctx, sqlcgen.InsertPrivateMessageParams{
+		SenderID:    sender.UserID,
+		ReceiverID:  &receiver.UserID,
+		MessageType: 0,
+		Content:     content,
+	})
 	if err != nil {
 		return "", nil, err
 	}
@@ -189,6 +213,6 @@ func (s *MessageService) CreatePrivateMessage(ctx context.Context, sender *sessi
 		ReceiverUsername: receiver.Username,
 		ContentType:      "text",
 		Content:          content,
-		Timestamp:        row.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
+		Timestamp:        row.CreatedAt.Time.UTC().Format("2006-01-02T15:04:05Z"),
 	}, nil
 }

@@ -173,6 +173,7 @@
 
 - 不带 `receiverUsername` 时，创建公共文件消息
 - 带 `receiverUsername` 时，创建私聊文件消息
+- 若 `receiverUsername` 不存在，返回 `not_found`
 - 上传成功后返回统一的文件元数据结构
 - 同时沿用现有实时消息事件：
   - 公共上传 -> `chat.public.message`
@@ -181,6 +182,11 @@
 #### `GET /api/v2/files/{fileId}`
 
 下载文件，权限规则由服务端校验发送者/接收者关系。
+
+文件元数据说明：
+
+- `file.fileId` 存在时表示该消息附带附件
+- `file.mimeType` 允许为空字符串，用于兼容旧数据或 MIME 未知的附件记录
 
 ### 2.5 群组
 
@@ -438,6 +444,8 @@
 - `bad_request`：请求结构或业务输入非法
 - `unauthorized`：认证失败
 - `not_found`：目标资源不存在
+- 对私聊文本消息发送，表示 `receiverUsername` 不存在
+- 对私聊文件上传，表示 `receiverUsername` 不存在
 - `payload_too_large`：消息体超过服务端限制
 - `internal_error`：服务端内部错误
 - `forbidden`：无权限访问
@@ -450,12 +458,14 @@
 - 最长 4096 字符
 - 私聊 `receiverUsername` 不能为空
 - 不允许给自己发送私聊
+- 私聊目标用户不存在时，HTTP 和 WebSocket 都返回 `not_found`
 
 当前文件消息约束：
 
 - 上传字段 `file` 必填
 - 上传大小受服务端 `MAX_FILE_SIZE_MB` 限制
 - 私聊文件不允许把 `receiverUsername` 指向自己
+- 私聊文件目标用户不存在时返回 `not_found`
 
 ## 4. 核心资源结构
 

@@ -25,6 +25,7 @@ import (
 	"github.com/elaine/chatter2/backend-go/internal/config"
 	protocolv2 "github.com/elaine/chatter2/backend-go/internal/protocol/v2"
 	"github.com/elaine/chatter2/backend-go/internal/repository"
+	"github.com/elaine/chatter2/backend-go/internal/repository/sqlcgen"
 	appsvc "github.com/elaine/chatter2/backend-go/internal/service"
 	"github.com/elaine/chatter2/backend-go/internal/session"
 )
@@ -371,9 +372,10 @@ func TestHandleV2FileUploadErrorsIntegration(t *testing.T) {
 	// Use a very small max to trigger file-too-large errors easily.
 	server := newFileIntegrationServer(pool, uploadDir)
 	server.cfg.MaxFileSize = 4
+	queries := sqlcgen.New(pool)
 	server.fileSvc = appsvc.NewFileService(
-		repository.NewFileRepository(pool),
-		repository.NewUserRepository(pool),
+		pool,
+		queries,
 		server.sessions,
 		uploadDir,
 		4,
@@ -513,20 +515,134 @@ func TestHandleV2GroupWebSocketIntegration(t *testing.T) {
 	}
 }
 
+func TestHandleV2GroupHTTPErrorsIntegration(t *testing.T) {
+	databaseURL := os.Getenv("CHATTER_TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("set CHATTER_TEST_DATABASE_URL to run database integration tests")
+	}
+
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, databaseURL)
+	if err != nil {
+		t.Fatalf("open test database: %v", err)
+	}
+	defer pool.Close()
+	if err := pool.Ping(ctx); err != nil {
+		t.Fatalf("ping test database: %v", err)
+	}
+
+	suffix := strings.ReplaceAll(time.Now().UTC().Format("20060102150405.000000000"), ".", "")
+	aliceID := insertHTTPTestUser(t, pool, "ght_alice_"+suffix, "Alice")
+	bobID := insertHTTPTestUser(t, pool, "ght_bob_"+suffix, "Bob")
+	carolID := insertHTTPTestUser(t, pool, "ght_carol_"+suffix, "Carol")
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM group_members WHERE group_id IN (SELECT group_id FROM groups WHERE creator_id IN ($1, $2, $3))`, aliceID, bobID, carolID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM messages WHERE sender_id IN ($1, $2, $3)`, aliceID, bobID, carolID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM groups WHERE creator_id IN ($1, $2, $3)`, aliceID, bobID, carolID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE user_id IN ($1, $2, $3)`, aliceID, bobID, carolID)
+	})
+
+	server := newGroupIntegrationServer(pool)
+	aliceToken := signTestToken(t, server, aliceID, "ght_alice_"+suffix, "Alice")
+	bobToken := signTestToken(t, server, bobID, "ght_bob_"+suffix, "Bob")
+	carolToken := signTestToken(t, server, carolID, "ght_carol_"+suffix, "Carol")
+
+	createBody := strings.NewReader(`{"groupName":"Errors Group","members":["ght_bob_` + suffix + `"]}`)
+	createReq := httptest.NewRequest(http.MethodPost, "/api/v2/groups", createBody)
+	createReq.Header.Set("Authorization", "Bearer "+aliceToken)
+	createReq.Header.Set("Content-Type", "application/json")
+	createRec := httptest.NewRecorder()
+	server.auth(server.handleV2CreateGroup)(createRec, createReq)
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("create group via HTTP: expected 201, got %d body=%s", createRec.Code, createRec.Body.String())
+	}
+
+	var createResp protocolv2.APIResponse[protocolv2.CreateGroupResponse]
+	if err := json.Unmarshal(createRec.Body.Bytes(), &createResp); err != nil {
+		t.Fatalf("unmarshal create group response: %v", err)
+	}
+	groupID := createResp.Data.Group.GroupID
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v2/groups/999999/members", nil)
+	req.SetPathValue("groupID", "999999")
+	req.Header.Set("Authorization", "Bearer "+aliceToken)
+	rec := httptest.NewRecorder()
+	server.auth(server.handleV2GroupMembers)(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 for missing group members, got %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/v2/groups/999999/history", nil)
+	req.SetPathValue("groupID", "999999")
+	req.Header.Set("Authorization", "Bearer "+aliceToken)
+	rec = httptest.NewRecorder()
+	server.auth(server.handleV2GroupHistory)(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 for missing group history, got %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	addReq := httptest.NewRequest(http.MethodPost, "/api/v2/groups/999999/members", strings.NewReader(`{"usernames":["ght_carol_`+suffix+`"]}`))
+	addReq.SetPathValue("groupID", "999999")
+	addReq.Header.Set("Authorization", "Bearer "+aliceToken)
+	addReq.Header.Set("Content-Type", "application/json")
+	addRec := httptest.NewRecorder()
+	server.auth(server.handleV2AddGroupMembers)(addRec, addReq)
+	if addRec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 for add members on missing group, got %d body=%s", addRec.Code, addRec.Body.String())
+	}
+
+	removeReq := httptest.NewRequest(http.MethodDelete, "/api/v2/groups/999999/members/ght_bob_"+suffix, nil)
+	removeReq.SetPathValue("groupID", "999999")
+	removeReq.SetPathValue("username", "ght_bob_"+suffix)
+	removeReq.Header.Set("Authorization", "Bearer "+aliceToken)
+	removeRec := httptest.NewRecorder()
+	server.auth(server.handleV2RemoveGroupMember)(removeRec, removeReq)
+	if removeRec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 for remove member on missing group, got %d body=%s", removeRec.Code, removeRec.Body.String())
+	}
+
+	historyReq := httptest.NewRequest(http.MethodGet, "/api/v2/groups/"+strconv.FormatInt(groupID, 10)+"/history", nil)
+	historyReq.SetPathValue("groupID", strconv.FormatInt(groupID, 10))
+	historyReq.Header.Set("Authorization", "Bearer "+carolToken)
+	historyRec := httptest.NewRecorder()
+	server.auth(server.handleV2GroupHistory)(historyRec, historyReq)
+	if historyRec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for non-member group history, got %d body=%s", historyRec.Code, historyRec.Body.String())
+	}
+
+	addReq = httptest.NewRequest(http.MethodPost, "/api/v2/groups/"+strconv.FormatInt(groupID, 10)+"/members", strings.NewReader(`{"usernames":["ght_carol_`+suffix+`"]}`))
+	addReq.SetPathValue("groupID", strconv.FormatInt(groupID, 10))
+	addReq.Header.Set("Authorization", "Bearer "+bobToken)
+	addReq.Header.Set("Content-Type", "application/json")
+	addRec = httptest.NewRecorder()
+	server.auth(server.handleV2AddGroupMembers)(addRec, addReq)
+	if addRec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for non-admin add members, got %d body=%s", addRec.Code, addRec.Body.String())
+	}
+
+	removeReq = httptest.NewRequest(http.MethodDelete, "/api/v2/groups/"+strconv.FormatInt(groupID, 10)+"/members/ght_alice_"+suffix, nil)
+	removeReq.SetPathValue("groupID", strconv.FormatInt(groupID, 10))
+	removeReq.SetPathValue("username", "ght_alice_"+suffix)
+	removeReq.Header.Set("Authorization", "Bearer "+bobToken)
+	removeRec = httptest.NewRecorder()
+	server.auth(server.handleV2RemoveGroupMember)(removeRec, removeReq)
+	if removeRec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for non-admin remove member, got %d body=%s", removeRec.Code, removeRec.Body.String())
+	}
+}
+
 func newGroupIntegrationServer(pool *pgxpool.Pool) *Server {
 	jwtSvc := auth.NewJWTService("test-secret-that-is-at-least-32-bytes", time.Hour)
 	sessions := session.NewManager()
-	userRepo := repository.NewUserRepository(pool)
-	msgRepo := repository.NewMessageRepository(pool)
-	groupRepo := repository.NewGroupsRepository(pool)
+	queries := sqlcgen.New(pool)
 	return &Server{
 		cfg: &config.Config{
 			HeartbeatTimeout: time.Second,
 		},
 		sessions: sessions,
 		jwtSvc:   jwtSvc,
-		msgSvc:   appsvc.NewMessageService(msgRepo, sessions, userRepo),
-		groupSvc: appsvc.NewGroupService(groupRepo, userRepo, sessions),
+		msgSvc:   appsvc.NewMessageService(queries, sessions),
+		groupSvc: appsvc.NewGroupService(queries, sessions),
 	}
 }
 
@@ -544,24 +660,21 @@ func newWebSocketTestServer() *Server {
 func newWebSocketIntegrationServer(pool *pgxpool.Pool) *Server {
 	jwtSvc := auth.NewJWTService("test-secret-that-is-at-least-32-bytes", time.Hour)
 	sessions := session.NewManager()
-	userRepo := repository.NewUserRepository(pool)
-	msgRepo := repository.NewMessageRepository(pool)
+	queries := sqlcgen.New(pool)
 	return &Server{
 		cfg: &config.Config{
 			HeartbeatTimeout: time.Second,
 		},
 		sessions: sessions,
 		jwtSvc:   jwtSvc,
-		msgSvc:   appsvc.NewMessageService(msgRepo, sessions, userRepo),
+		msgSvc:   appsvc.NewMessageService(queries, sessions),
 	}
 }
 
 func newFileIntegrationServer(pool *pgxpool.Pool, uploadDir string) *Server {
 	jwtSvc := auth.NewJWTService("test-secret-that-is-at-least-32-bytes", time.Hour)
 	sessions := session.NewManager()
-	userRepo := repository.NewUserRepository(pool)
-	msgRepo := repository.NewMessageRepository(pool)
-	fileRepo := repository.NewFileRepository(pool)
+	queries := sqlcgen.New(pool)
 	return &Server{
 		cfg: &config.Config{
 			HeartbeatTimeout: time.Second,
@@ -570,8 +683,8 @@ func newFileIntegrationServer(pool *pgxpool.Pool, uploadDir string) *Server {
 		},
 		sessions: sessions,
 		jwtSvc:   jwtSvc,
-		msgSvc:   appsvc.NewMessageService(msgRepo, sessions, userRepo),
-		fileSvc:  appsvc.NewFileService(fileRepo, userRepo, sessions, uploadDir, 8*1024*1024),
+		msgSvc:   appsvc.NewMessageService(queries, sessions),
+		fileSvc:  appsvc.NewFileService(pool, queries, sessions, uploadDir, 8*1024*1024),
 	}
 }
 

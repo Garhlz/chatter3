@@ -131,7 +131,7 @@ CHATTER_TEST_DATABASE_URL="$DATABASE_URL" go test ./internal/transport/http -run
 - 普通 `go test ./...` 不依赖 Docker PostgreSQL
 - 集成测试需要先执行 migration
 - `internal/service` 集成测试覆盖消息落库与历史读取
-- `internal/transport/http` 集成测试覆盖 WebSocket 发送、落库、实时投递、离线私聊回推，以及文件上传下载
+- `internal/transport/http` 集成测试覆盖 WebSocket 发送、落库、实时投递、离线私聊回推、文件上传下载，以及群组 HTTP/权限错误语义
 - 集成测试会创建临时用户和消息，并在测试结束后清理
 
 生成 `sqlc`：
@@ -187,6 +187,12 @@ JWT_EXPIRATION=24h
 
 ## 当前状态
 
+当前判断：
+
+- 后端核心聊天功能已经成型
+- 现在的主要工作从“大功能建设”转为“错误语义收口、权限边界测试、联调驱动小修”
+- 尚未完成的主要是增强能力，而不是主路径缺失
+
 已完成：
 
 - `P2`：HTTP 注册 / 登录 / 历史同步
@@ -209,6 +215,23 @@ JWT_EXPIRATION=24h
   - 上传时同时创建一条文件消息
   - 公共上传广播 `chat.public.message`
   - 私聊上传投递 `chat.private.message`
+ - 群组：
+   - `POST /api/v2/groups`
+   - `GET /api/v2/groups`
+   - `GET /api/v2/groups/{groupID}`
+   - `GET /api/v2/groups/{groupID}/members`
+   - `POST /api/v2/groups/{groupID}/members`
+   - `DELETE /api/v2/groups/{groupID}/members/{username}`
+   - `GET /api/v2/groups/{groupID}/history`
+   - `chat.group.send -> chat.group.message`
+
+仍属于增强/后续项：
+
+- 已读回执
+- 撤回
+- 多端同步策略
+- 推送通知
+- 更细的文件能力（如对象存储、断点续传、预览）
 
 当前消息约束：
 
@@ -217,16 +240,27 @@ JWT_EXPIRATION=24h
 - 文本消息最长 4096 字符
 - 私聊必须提供 `receiverUsername`
 - 不允许给自己发送私聊
+- 私聊目标用户不存在时返回 `not_found`
 - 私聊目标离线时仍然落库，后续可通过历史接口读取
+- 不存在的私聊历史目标用户返回 `not_found`
 
 当前文件约束：
 
 - 上传必须携带 `multipart/form-data` 字段 `file`
 - 可选字段 `receiverUsername` 决定公共文件消息或私聊文件消息
 - 上传大小受 `MAX_FILE_SIZE_MB` 限制
+- 私聊文件上传目标不存在时返回 `not_found`
 - 下载权限继承消息权限：
   - 公共文件：任意已登录用户可下载
   - 私聊文件：仅发送者和接收者可下载
+- 历史消息和下载链路允许附件 MIME 元数据为空；服务端会返回空字符串，不会因旧数据 panic
+
+当前群组约束：
+
+- 不存在的群组资源返回 `not_found`
+- 非成员访问群历史返回 `forbidden`
+- 非管理员/群主添加或移除其他成员返回 `forbidden`
+- 不能移除群主
 
 ## 协议稳定性
 
@@ -240,6 +274,10 @@ JWT_EXPIRATION=24h
 - 文本消息输入约束和错误码集合
 - 文件上传下载 HTTP 接口
 - 通过上传触发的文件消息实时事件
+- 未知私聊对象、未知私聊文件接收者统一返回 `not_found`
+- 附件元数据中的 MIME type 允许为空字符串
+- 群组缺失资源统一返回 `not_found`
+- 群成员权限不足统一返回 `forbidden`
 
 还不稳定：
 
