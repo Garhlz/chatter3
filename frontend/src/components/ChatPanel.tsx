@@ -1,4 +1,5 @@
 import { useRef } from "react";
+import { useShallow } from "zustand/shallow";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Composer } from "./Composer";
 import { GroupPanel } from "./GroupPanel";
@@ -19,9 +20,9 @@ export function ChatPanel() {
   const historyLoading = useChatStore((state) => state.historyLoading);
   const lastSelectedFile = useChatStore((state) => state.lastSelectedFile);
   const uploadingFile = useChatStore((state) => state.uploadingFile);
-  const messages = useChatStore(selectActiveMessages);
-  const activeConversation = useChatStore(selectActiveConversation);
-  const activeStats = useChatStore(selectActiveStats);
+  const messages = useChatStore(useShallow(selectActiveMessages));
+  const activeConversation = useChatStore(useShallow(selectActiveConversation));
+  const activeStats = useChatStore(useShallow(selectActiveStats));
   const setLastSelectedFile = useChatStore((state) => state.setLastSelectedFile);
   const loadOlderHistory = useChatStore((state) => state.loadOlderHistory);
   const reloadActiveHistory = useChatStore((state) => state.reloadActiveHistory);

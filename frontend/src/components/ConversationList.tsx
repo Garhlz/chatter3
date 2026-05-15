@@ -1,3 +1,4 @@
+import { useShallow } from "zustand/shallow";
 import {
   selectConversationList,
   useChatStore,
@@ -7,7 +8,7 @@ export function ConversationList() {
   const token = useChatStore((state) => state.token);
   const onlineUsers = useChatStore((state) => state.onlineUsers);
   const activeConversationId = useChatStore((state) => state.activeConversationId);
-  const conversations = useChatStore(selectConversationList);
+  const conversations = useChatStore(useShallow(selectConversationList));
   const newGroupName = useChatStore((state) => state.newGroupName);
   const newGroupMembers = useChatStore((state) => state.newGroupMembers);
   const setNewGroupName = useChatStore((state) => state.setNewGroupName);

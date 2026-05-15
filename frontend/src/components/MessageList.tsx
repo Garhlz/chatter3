@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { useShallow } from "zustand/shallow";
 import { httpBaseURL } from "../config";
 import { formatMessageTime } from "./format";
 import {
@@ -18,7 +19,7 @@ export function MessageList() {
   const activeScrollTop = useChatStore(
     (state) => state.scrollPositions[state.activeConversationId],
   );
-  const messages = useChatStore(selectActiveMessages);
+  const messages = useChatStore(useShallow(selectActiveMessages));
   const retryMessage = useChatStore((state) => state.retryMessage);
   const setConversationScrollTop = useChatStore(
     (state) => state.setConversationScrollTop,
