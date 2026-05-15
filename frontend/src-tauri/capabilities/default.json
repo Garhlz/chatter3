@@ -6,6 +6,9 @@
   "permissions": [
     "core:default",
     "dialog:allow-open",
-    "opener:default"
+    "opener:default",
+    "process:default",
+    "notification:default",
+    "store:default"
   ]
 }

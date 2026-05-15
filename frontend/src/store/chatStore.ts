@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { createAPIClient, APIClientError } from "../api/client";
 import { httpBaseURL, wsBaseURL } from "../config";
+import { saveToken, clearToken, loadToken, showNotification } from "../desktop";
 import { createRealtimeClient, type RealtimeStatus } from "../realtime/client";
 import type {
   ChatMessage,
@@ -78,6 +79,7 @@ type ChatState = {
   addGroupMembers: (groupID: number, usernames: string[]) => Promise<void>;
   removeGroupMember: (groupID: number, username: string) => Promise<void>;
   uploadFile: (file: File, receiverUsername?: string) => Promise<void>;
+  bootstrapSession: () => Promise<void>;
 };
 
 const api = createAPIClient(httpBaseURL);
@@ -103,6 +105,7 @@ function isUnauthorizedError(err: unknown) {
 
 function expireSession(message = "Session expired. Log in again.") {
   realtime.disconnect();
+  void clearToken();
   useChatStore.setState({
     token: "",
     currentUser: null,
@@ -112,6 +115,32 @@ function expireSession(message = "Session expired. Log in again.") {
     reconnectAttempt: 0,
     historyLoading: false,
   });
+}
+
+function decodeStoredUser(token: string): CurrentUser | null {
+  try {
+    const [, payload] = token.split(".");
+    if (!payload) {
+      return null;
+    }
+    const normalized = payload.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "=");
+    const decoded = JSON.parse(window.atob(padded)) as {
+      userId?: number;
+      username?: string;
+      nickname?: string;
+    };
+    if (!decoded.userId || !decoded.username || !decoded.nickname) {
+      return null;
+    }
+    return {
+      userId: decoded.userId,
+      username: decoded.username,
+      nickname: decoded.nickname,
+    };
+  } catch {
+    return null;
+  }
 }
 
 function scheduleSendTimeout(conversationId: string, localId: string) {
@@ -218,6 +247,13 @@ function ingestRealtimeMessage(message: ChatMessage, requestId?: string) {
             })
           : privateConversation(peer, true));
     const isActive = state.activeConversationId === cid;
+    if (!isActive && message.content) {
+      const title =
+        message.scope === "public"
+          ? "Public Lobby"
+          : `${message.sender.nickname}`;
+      showNotification(title, message.content);
+    }
     return {
       messagesByConversation: { ...state.messagesByConversation, [cid]: next },
       conversations: {
@@ -305,6 +341,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
         onlineUsers: users,
         groups,
       });
+
+      void saveToken(response.token);
 
       realtime.connect(response.token, connectionHandlers(), {
         maxReconnectAttempts: 6,
@@ -669,6 +707,72 @@ export const useChatStore = create<ChatState>((set, get) => ({
     } catch (err) {
       if (isUnauthorizedError(err)) { expireSession(); return; }
       set({ error: err instanceof Error ? err.message : "Failed to upload file", uploadingFile: false });
+    }
+  },
+
+  bootstrapSession: async () => {
+    const storedToken = await loadToken();
+    if (!storedToken) {
+      return;
+    }
+
+    const storedUser = decodeStoredUser(storedToken);
+    if (!storedUser) {
+      await clearToken();
+      return;
+    }
+
+    set({
+      token: storedToken,
+      currentUser: storedUser,
+      authExpired: false,
+      error: "",
+      notice: "Restoring saved session…",
+      reconnectAttempt: 0,
+    });
+
+    try {
+      const [historyPage, users, groups] = await Promise.all([
+        api.getPublicHistoryPage(storedToken),
+        api.getOnlineUsers(storedToken),
+        api.listGroups(storedToken),
+      ]);
+      const publicMessages = normalizeMessages(historyPage.data);
+      const conversations: Record<string, Conversation> = {
+        [publicConversationId]: publicConversation(publicMessages),
+      };
+      for (const user of users) {
+        conversations[conversationIdFor("private", user.username)] =
+          privateConversation(user.username, user.online);
+      }
+      for (const group of groups) {
+        conversations[conversationIdFor("group", String(group.groupID))] =
+          groupConversation(group);
+      }
+
+      set({
+        activeConversationId: publicConversationId,
+        messagesByConversation: { [publicConversationId]: publicMessages },
+        historyCursors: { [publicConversationId]: historyPage.nextCursor },
+        conversations,
+        onlineUsers: users,
+        groups,
+        notice: "Saved session restored.",
+      });
+
+      realtime.connect(storedToken, connectionHandlers(), {
+        maxReconnectAttempts: 6,
+        reconnectBaseDelayMs: 900,
+      });
+    } catch (err) {
+      if (isUnauthorizedError(err)) {
+        expireSession("Stored session expired. Log in again.");
+        return;
+      }
+      set({
+        error: err instanceof Error ? err.message : "Failed to restore saved session",
+        notice: "",
+      });
     }
   },
 
