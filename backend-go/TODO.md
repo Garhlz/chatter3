@@ -18,6 +18,13 @@
 - [x] `chat.public.send -> chat.public.message`
 - [x] `chat.private.send -> chat.private.message`
 - [x] `GET /api/v2/users/online` 与当前会话状态的一致输出
+- [x] `POST /api/v2/groups` 创建群组
+- [x] `GET /api/v2/groups` / `GET /api/v2/groups/{groupID}` 群组列表与详情
+- [x] `GET /api/v2/groups/{groupID}/members` 群成员列表
+- [x] `POST /api/v2/groups/{groupID}/members` 添加成员
+- [x] `DELETE /api/v2/groups/{groupID}/members/{username}` 移除成员
+- [x] `GET /api/v2/groups/{groupID}/history` 群聊历史
+- [x] `chat.group.send -> chat.group.message` 群聊实时消息
 
 ## Backend Next
 
@@ -36,13 +43,13 @@
 
 ## Backend Later
 
-- [ ] 群聊协议、持久化与实时广播
+- [x] 群聊协议、持久化与实时广播
 
 ## Backend 产出目标
 
 - 后端实时链路具备稳定语义和测试保护
 - 错误码、输入约束、在线状态和消息事件可以被前端稳定依赖
-- 后续文件与群聊能力可以在当前协议上继续扩展
+- 群聊能力已可在当前协议上扩展
 
 ## 后端协议稳定性
 
@@ -57,10 +64,12 @@
 - 文本消息约束和 WS 错误码集合
 - `POST /api/v2/files/upload`
 - `GET /api/v2/files/{fileId}`
+- 群组 CRUD、成员管理与群聊历史
+- `chat.group.send -> chat.group.message`
+- `forbidden` 错误码（非成员访问、权限不足）
 
 当前仍不应视为稳定契约：
 
-- 群聊协议
 - 已读、撤回、多端同步等扩展能力
 
 ## 当前错误语义

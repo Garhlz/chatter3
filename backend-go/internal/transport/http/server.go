@@ -52,6 +52,7 @@ type Server struct {
 	userSvc  *appsvc.UserService
 	msgSvc   *appsvc.MessageService
 	fileSvc  *appsvc.FileService
+	groupSvc *appsvc.GroupService
 }
 
 // NewServer wires up all routes and dependencies.
@@ -75,10 +76,12 @@ func NewServer(
 	userRepo := repository.NewUserRepository(pool)
 	msgRepo := repository.NewMessageRepository(pool)
 	fileRepo := repository.NewFileRepository(pool)
+	groupRepo := repository.NewGroupsRepository(pool)
 
 	userSvc := appsvc.NewUserService(userRepo, jwtSvc)
 	msgSvc := appsvc.NewMessageService(msgRepo, sessions, userRepo)
 	fileSvc := appsvc.NewFileService(fileRepo, userRepo, sessions, cfg.UploadDir, cfg.MaxFileSize)
+	groupSvc := appsvc.NewGroupService(groupRepo, userRepo, sessions)
 
 	s := &Server{
 		cfg:      cfg,
@@ -87,6 +90,7 @@ func NewServer(
 		userSvc:  userSvc,
 		msgSvc:   msgSvc,
 		fileSvc:  fileSvc,
+		groupSvc: groupSvc,
 	}
 
 	mux := http.NewServeMux()
@@ -109,6 +113,15 @@ func NewServer(
 	// File endpoints — auth required.
 	mux.HandleFunc("POST /api/v2/files/upload", s.auth(s.handleV2Upload))
 	mux.HandleFunc("GET /api/v2/files/{fileID}", s.auth(s.handleV2Download))
+
+	// Group endpoints — all require auth.
+	mux.HandleFunc("POST /api/v2/groups", s.auth(s.handleV2CreateGroup))
+	mux.HandleFunc("GET /api/v2/groups", s.auth(s.handleV2ListGroups))
+	mux.HandleFunc("GET /api/v2/groups/{groupID}", s.auth(s.handleV2GetGroup))
+	mux.HandleFunc("GET /api/v2/groups/{groupID}/members", s.auth(s.handleV2GroupMembers))
+	mux.HandleFunc("POST /api/v2/groups/{groupID}/members", s.auth(s.handleV2AddGroupMembers))
+	mux.HandleFunc("DELETE /api/v2/groups/{groupID}/members/{username}", s.auth(s.handleV2RemoveGroupMember))
+	mux.HandleFunc("GET /api/v2/groups/{groupID}/history", s.auth(s.handleV2GroupHistory))
 
 	s.server = &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.HTTPPort),
@@ -483,6 +496,22 @@ func (s *Server) handleV2WebSocket(w http.ResponseWriter, r *http.Request) {
 				body := eventJSON("chat.private.message", in.RequestID, msg)
 				_ = s.sessions.Send(receiverUsername, body)
 				_ = s.sessions.Send(sess.Username, body)
+
+			case "chat.group.send":
+				var payload protocolv2.GroupSendPayload
+				if err := json.Unmarshal(in.Payload, &payload); err != nil {
+					_ = ws.writeFrame(wsOpcodeText, errorEventJSON("bad_request", "invalid group chat payload", in.RequestID))
+					continue
+				}
+
+				msg, memberUsernames, err := s.groupSvc.SendGroupMessage(r.Context(), sess, payload.GroupID, payload.Content)
+				if err != nil {
+					_ = ws.writeFrame(wsOpcodeText, messageErrorEventJSON(err, in.RequestID))
+					continue
+				}
+
+				body := eventJSON("chat.group.message", in.RequestID, msg)
+				s.sessions.SendToUsers(body, memberUsernames)
 			default:
 				_ = ws.writeFrame(wsOpcodeText, errorEventJSON("not_implemented", "websocket event is not implemented yet", in.RequestID))
 			}
@@ -611,6 +640,187 @@ func (s *Server) handleV2Download(w http.ResponseWriter, r *http.Request) {
 	http.ServeContent(w, r, download.FileName, stat.ModTime(), fd)
 }
 
+func (s *Server) handleV2CreateGroup(w http.ResponseWriter, r *http.Request) {
+	claims := claimsFrom(r)
+	var req protocolv2.CreateGroupRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+
+	group, err := s.groupSvc.CreateGroup(r.Context(), claims.UserID, claims.Username, claims.Nickname, req.GroupName, req.Members)
+	switch {
+	case errors.Is(err, appsvc.ErrGroupNameRequired) || errors.Is(err, appsvc.ErrGroupNameTooLong):
+		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	case errors.Is(err, appsvc.ErrMemberNotFound):
+		writeError(w, http.StatusNotFound, "not_found", err.Error())
+		return
+	case err != nil:
+		slog.Error("create group failed", "err", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "failed to create group")
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, protocolv2.APIResponse[protocolv2.CreateGroupResponse]{
+		Data: protocolv2.CreateGroupResponse{Group: *group},
+	})
+}
+
+func (s *Server) handleV2ListGroups(w http.ResponseWriter, r *http.Request) {
+	claims := claimsFrom(r)
+
+	groups, err := s.groupSvc.GetUserGroups(r.Context(), claims.UserID)
+	if err != nil {
+		slog.Error("list groups failed", "err", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "failed to list groups")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, protocolv2.APIResponse[[]protocolv2.Group]{Data: groups})
+}
+
+func (s *Server) handleV2GetGroup(w http.ResponseWriter, r *http.Request) {
+	groupID, err := strconv.ParseInt(r.PathValue("groupID"), 10, 64)
+	if err != nil || groupID <= 0 {
+		writeError(w, http.StatusBadRequest, "bad_request", "invalid group id")
+		return
+	}
+
+	group, err := s.groupSvc.GetGroupByID(r.Context(), groupID)
+	if errors.Is(err, repository.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "not_found", "group not found")
+		return
+	}
+	if err != nil {
+		slog.Error("get group failed", "err", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "failed to get group")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, protocolv2.APIResponse[protocolv2.Group]{Data: *group})
+}
+
+func (s *Server) handleV2GroupMembers(w http.ResponseWriter, r *http.Request) {
+	groupID, err := strconv.ParseInt(r.PathValue("groupID"), 10, 64)
+	if err != nil || groupID <= 0 {
+		writeError(w, http.StatusBadRequest, "bad_request", "invalid group id")
+		return
+	}
+
+	members, err := s.groupSvc.GetGroupMembers(r.Context(), groupID)
+	if errors.Is(err, repository.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "not_found", "group not found")
+		return
+	}
+	if err != nil {
+		slog.Error("get group members failed", "err", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "failed to get members")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, protocolv2.APIResponse[[]protocolv2.GroupMember]{Data: members})
+}
+
+func (s *Server) handleV2AddGroupMembers(w http.ResponseWriter, r *http.Request) {
+	claims := claimsFrom(r)
+	groupID, err := strconv.ParseInt(r.PathValue("groupID"), 10, 64)
+	if err != nil || groupID <= 0 {
+		writeError(w, http.StatusBadRequest, "bad_request", "invalid group id")
+		return
+	}
+
+	var req protocolv2.AddGroupMemberRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+
+	members, err := s.groupSvc.AddMembers(r.Context(), claims.UserID, groupID, req.Usernames)
+	switch {
+	case errors.Is(err, repository.ErrNotFound):
+		writeError(w, http.StatusNotFound, "not_found", "group not found")
+		return
+	case errors.Is(err, appsvc.ErrNotGroupAdmin):
+		writeError(w, http.StatusForbidden, "forbidden", err.Error())
+		return
+	case errors.Is(err, appsvc.ErrMemberNotFound):
+		writeError(w, http.StatusNotFound, "not_found", err.Error())
+		return
+	case err != nil:
+		slog.Error("add group members failed", "err", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "failed to add members")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, protocolv2.APIResponse[[]protocolv2.GroupMember]{Data: members})
+}
+
+func (s *Server) handleV2RemoveGroupMember(w http.ResponseWriter, r *http.Request) {
+	claims := claimsFrom(r)
+	groupID, err := strconv.ParseInt(r.PathValue("groupID"), 10, 64)
+	if err != nil || groupID <= 0 {
+		writeError(w, http.StatusBadRequest, "bad_request", "invalid group id")
+		return
+	}
+
+	targetUsername := r.PathValue("username")
+	if err := s.groupSvc.RemoveMember(r.Context(), claims.UserID, groupID, targetUsername); err != nil {
+		switch {
+		case errors.Is(err, repository.ErrNotFound):
+			writeError(w, http.StatusNotFound, "not_found", "user not found")
+			return
+		case errors.Is(err, appsvc.ErrNotGroupAdmin):
+			writeError(w, http.StatusForbidden, "forbidden", err.Error())
+			return
+		case errors.Is(err, appsvc.ErrMemberNotFound):
+			writeError(w, http.StatusNotFound, "not_found", "member not found in group")
+			return
+		case errors.Is(err, appsvc.ErrCannotRemoveOwner):
+			writeError(w, http.StatusForbidden, "forbidden", err.Error())
+			return
+		default:
+			slog.Error("remove group member failed", "err", err)
+			writeError(w, http.StatusInternalServerError, "internal_error", "failed to remove member")
+			return
+		}
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handleV2GroupHistory(w http.ResponseWriter, r *http.Request) {
+	claims := claimsFrom(r)
+	groupID, err := strconv.ParseInt(r.PathValue("groupID"), 10, 64)
+	if err != nil || groupID <= 0 {
+		writeError(w, http.StatusBadRequest, "bad_request", "invalid group id")
+		return
+	}
+
+	limit := queryInt(r, "limit", 50)
+	cursor := r.URL.Query().Get("cursor")
+
+	msgs, nextCursor, err := s.groupSvc.GetGroupHistory(r.Context(), claims.UserID, groupID, cursor, limit)
+	switch {
+	case errors.Is(err, repository.ErrNotFound):
+		writeError(w, http.StatusNotFound, "not_found", "group not found")
+		return
+	case errors.Is(err, appsvc.ErrNotGroupMember):
+		writeError(w, http.StatusForbidden, "forbidden", err.Error())
+		return
+	case errors.Is(err, appsvc.ErrInvalidCursor):
+		writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+		return
+	case err != nil:
+		slog.Error("group history failed", "err", err)
+		writeError(w, http.StatusInternalServerError, "internal_error", "failed to load group history")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, protocolv2.CursorResponse[protocolv2.Message]{
+		Data:       msgs,
+		NextCursor: nextCursor,
+	})
+}
+
 // --- Helpers ---
 
 func writeJSON(w http.ResponseWriter, status int, body any) {
@@ -639,6 +849,8 @@ func messageErrorCode(err error) string {
 		return "payload_too_large"
 	case errors.Is(err, repository.ErrNotFound):
 		return "not_found"
+	case errors.Is(err, appsvc.ErrNotGroupMember):
+		return "forbidden"
 	case errors.Is(err, appsvc.ErrContentRequired),
 		errors.Is(err, appsvc.ErrReceiverRequired),
 		errors.Is(err, appsvc.ErrCannotMessageSelf),

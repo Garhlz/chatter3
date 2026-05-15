@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"mime/multipart"
 	"net"
@@ -416,6 +417,116 @@ func TestHandleV2FileUploadErrorsIntegration(t *testing.T) {
 	server.auth(server.handleV2Download)(rec2, req2)
 	if rec2.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 for zero file id, got %d body=%s", rec2.Code, rec2.Body.String())
+	}
+}
+
+// TestHandleV2GroupWebSocketIntegration verifies the full group chat realtime path:
+// create group via HTTP -> both members connect via WebSocket ->
+// one sends chat.group.send -> both receive chat.group.message.
+//
+// Run with:
+//
+//	CHATTER_TEST_DATABASE_URL="$DATABASE_URL" go test ./internal/transport/http -run GroupIntegration
+func TestHandleV2GroupWebSocketIntegration(t *testing.T) {
+	databaseURL := os.Getenv("CHATTER_TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("set CHATTER_TEST_DATABASE_URL to run database integration tests")
+	}
+
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, databaseURL)
+	if err != nil {
+		t.Fatalf("open test database: %v", err)
+	}
+	defer pool.Close()
+	if err := pool.Ping(ctx); err != nil {
+		t.Fatalf("ping test database: %v", err)
+	}
+
+	suffix := strings.ReplaceAll(time.Now().UTC().Format("20060102150405.000000000"), ".", "")
+	aliceID := insertHTTPTestUser(t, pool, "gws_alice_"+suffix, "Alice")
+	bobID := insertHTTPTestUser(t, pool, "gws_bob_"+suffix, "Bob")
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM group_members WHERE group_id IN (SELECT group_id FROM groups WHERE creator_id IN ($1, $2))`, aliceID, bobID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM messages WHERE sender_id IN ($1, $2)`, aliceID, bobID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM groups WHERE creator_id IN ($1, $2)`, aliceID, bobID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE user_id IN ($1, $2)`, aliceID, bobID)
+	})
+
+	server := newGroupIntegrationServer(pool)
+	alice := openTestWebSocketForUser(t, server, aliceID, "gws_alice_"+suffix, "Alice")
+	bob := openTestWebSocketForUser(t, server, bobID, "gws_bob_"+suffix, "Bob")
+
+	alice.readReady(t)
+	bob.readReady(t)
+
+	// Create a group with alice as owner and bob as member via HTTP.
+	token := signTestToken(t, server, aliceID, "gws_alice_"+suffix, "Alice")
+	createBody := strings.NewReader(`{"groupName":"Test Group","members":["gws_bob_` + suffix + `"]}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v2/groups", createBody)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	server.auth(server.handleV2CreateGroup)(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create group via HTTP: expected 201, got %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	var createResp protocolv2.APIResponse[protocolv2.CreateGroupResponse]
+	if err := json.Unmarshal(rec.Body.Bytes(), &createResp); err != nil {
+		t.Fatalf("unmarshal create group response: %v", err)
+	}
+	groupID := createResp.Data.Group.GroupID
+
+	// Alice sends a group message via WebSocket.
+	alice.writeText(t, fmt.Sprintf(`{"event":"chat.group.send","requestId":"g-1","payload":{"groupID":%d,"content":"hello group"}}`, groupID))
+
+	// Both receive the group message.
+	aliceMsg := alice.readMessageEvent(t, "chat.group.message")
+	bobMsg := bob.readMessageEvent(t, "chat.group.message")
+	if aliceMsg.RequestID != "g-1" || bobMsg.RequestID != "g-1" {
+		t.Fatalf("expected group request id to be echoed, got %#v %#v", aliceMsg, bobMsg)
+	}
+	if aliceMsg.Payload.GroupID != groupID || aliceMsg.Payload.Scope != "group" || aliceMsg.Payload.Content != "hello group" {
+		t.Fatalf("unexpected group delivery: %#v", aliceMsg.Payload)
+	}
+	if bobMsg.Payload.GroupID != groupID || bobMsg.Payload.Content != "hello group" {
+		t.Fatalf("unexpected group delivery to bob: %#v", bobMsg.Payload)
+	}
+
+	// Verify group history via HTTP.
+	historyReq := httptest.NewRequest(http.MethodGet, "/api/v2/groups/"+strconv.FormatInt(groupID, 10)+"/history", nil)
+	historyReq.SetPathValue("groupID", strconv.FormatInt(groupID, 10))
+	historyReq.Header.Set("Authorization", "Bearer "+token)
+	historyRec := httptest.NewRecorder()
+	server.auth(server.handleV2GroupHistory)(historyRec, historyReq)
+	if historyRec.Code != http.StatusOK {
+		t.Fatalf("get group history: expected 200, got %d body=%s", historyRec.Code, historyRec.Body.String())
+	}
+
+	var cursorResp protocolv2.CursorResponse[protocolv2.Message]
+	if err := json.Unmarshal(historyRec.Body.Bytes(), &cursorResp); err != nil {
+		t.Fatalf("unmarshal group history: %v", err)
+	}
+	if len(cursorResp.Data) != 1 || cursorResp.Data[0].Content != "hello group" {
+		t.Fatalf("unexpected group history: %#v", cursorResp)
+	}
+}
+
+func newGroupIntegrationServer(pool *pgxpool.Pool) *Server {
+	jwtSvc := auth.NewJWTService("test-secret-that-is-at-least-32-bytes", time.Hour)
+	sessions := session.NewManager()
+	userRepo := repository.NewUserRepository(pool)
+	msgRepo := repository.NewMessageRepository(pool)
+	groupRepo := repository.NewGroupsRepository(pool)
+	return &Server{
+		cfg: &config.Config{
+			HeartbeatTimeout: time.Second,
+		},
+		sessions: sessions,
+		jwtSvc:   jwtSvc,
+		msgSvc:   appsvc.NewMessageService(msgRepo, sessions, userRepo),
+		groupSvc: appsvc.NewGroupService(groupRepo, userRepo, sessions),
 	}
 }
 

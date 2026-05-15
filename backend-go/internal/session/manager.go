@@ -178,6 +178,20 @@ func (m *Manager) Broadcast(msg []byte, excludeUsername string) {
 	}
 }
 
+// SendToUsers 向指定用户名列表中的所有在线会话写入消息（非阻塞）。
+func (m *Manager) SendToUsers(msg []byte, usernames []string) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, uname := range usernames {
+		if s, ok := m.byUser[uname]; ok {
+			select {
+			case s.Send <- msg:
+			default:
+			}
+		}
+	}
+}
+
 // Send 向指定用户发送消息（非阻塞）。
 func (m *Manager) Send(username string, msg []byte) bool {
 	m.mu.RLock()
