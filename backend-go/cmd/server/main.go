@@ -9,11 +9,9 @@ import (
 	"syscall"
 
 	"github.com/elaine/chatter2/backend-go/internal/config"
-	"github.com/elaine/chatter2/backend-go/internal/dispatcher"
 	"github.com/elaine/chatter2/backend-go/internal/session"
 	"github.com/elaine/chatter2/backend-go/internal/storage"
 	httptransport "github.com/elaine/chatter2/backend-go/internal/transport/http"
-	tcptransport "github.com/elaine/chatter2/backend-go/internal/transport/tcp"
 )
 
 func main() {
@@ -39,22 +37,10 @@ func main() {
 
 	// Core shared components.
 	sessions := session.NewManager()
-	disp := dispatcher.New(sessions)
 
 	var wg sync.WaitGroup
 
-	// Legacy TCP server — kept running as a compatibility reference.
-	// Remove this block once the v2 WebSocket path fully replaces it.
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		tcpSrv := tcptransport.NewServer(cfg, sessions, disp)
-		if err := tcpSrv.Run(ctx); err != nil {
-			slog.Error("TCP 服务器退出", "err", err)
-		}
-	}()
-
-	// v2 HTTP server — now receives pool and sessions so handlers can access DB and online state.
+	// v2 HTTP server.
 	wg.Add(1)
 	go func() {
 		defer wg.Done()

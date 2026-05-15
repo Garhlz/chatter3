@@ -243,11 +243,11 @@ JWT_EXPIRATION=24h
 
 还不稳定：
 
-- 群聊相关协议
+- 已读、撤回、多端同步等扩展能力
 
 未完成：
 
-- 群聊能力
+- 已读回执、撤回、多端同步
 
 ## 目录结构
 
@@ -256,14 +256,12 @@ cmd/server/       程序入口
 internal/
   auth/           JWT 与密码哈希
   config/         配置加载
-  dispatcher/     消息分发
-  protocol/       消息类型定义 + JSON 编解码
-  repository/     用户与消息数据库访问
-  service/        用户与消息业务逻辑
+  protocol/       消息类型定义 (v2) + 旧协议类型参考 (v1)
+  repository/     用户、消息、文件、群组数据库访问
+  service/        用户、消息、文件、群组业务逻辑
   session/        在线会话管理
   storage/        pgxpool 初始化
   transport/
-    tcp/          旧 TCP 兼容参考
     http/         HTTP v2 路由与 WebSocket transport
 migrations/       goose 迁移文件
 sql/queries/      sqlc 查询 SQL

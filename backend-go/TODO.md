@@ -25,6 +25,10 @@
 - [x] `DELETE /api/v2/groups/{groupID}/members/{username}` 移除成员
 - [x] `GET /api/v2/groups/{groupID}/history` 群聊历史
 - [x] `chat.group.send -> chat.group.message` 群聊实时消息
+- [x] `internal/auth` 单元测试（5 个用例）
+- [x] `internal/config` 单元测试（5 个用例）
+- [x] `internal/repository` 集成测试（user/message/group 共 8 个子用例）
+- [x] v1 遗留死代码清理（tcp/dispatcher/codec）
 
 ## Backend Next
 
@@ -44,12 +48,17 @@
 ## Backend Later
 
 - [x] 群聊协议、持久化与实时广播
+- [x] `internal/auth` 单元测试：JWT Sign/Validate/过期/错秘钥、bcrypt Hash/Check
+- [x] `internal/config` 单元测试：必填字段、默认值、自定义值
+- [x] `internal/repository` 集成测试：user/message/group CRUD
+- [x] 移除 v1 遗留死代码：`transport/tcp/`、`dispatcher/`、`protocol/codec.go`、`config.TCPPort`
 
 ## Backend 产出目标
 
 - 后端实时链路具备稳定语义和测试保护
 - 错误码、输入约束、在线状态和消息事件可以被前端稳定依赖
 - 群聊能力已可在当前协议上扩展
+- 核心包（auth、config、repository）已有测试覆盖
 
 ## 后端协议稳定性
 
