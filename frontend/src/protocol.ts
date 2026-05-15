@@ -42,14 +42,61 @@ export type LoginResponse = {
   user: CurrentUser;
 };
 
+export type FileAttachment = {
+  fileId: number;
+  fileName: string;
+  storedFileName: string;
+  downloadURL: string;
+  size: number;
+  mimeType: string;
+};
+
 export type ChatMessage = {
   messageId: number;
-  scope: "public" | "private";
+  scope: "public" | "private" | "group";
   sender: CurrentUser;
   receiverUsername?: string;
+  groupID?: number;
   contentType: "text" | "file";
   content: string;
+  file?: FileAttachment;
   timestamp: string;
+};
+
+export type Group = {
+  groupID: number;
+  groupName: string;
+  creator: CurrentUser;
+  memberCount: number;
+  createdAt: string;
+};
+
+export type GroupMember = {
+  user: CurrentUser;
+  role: number;
+  joinedAt: string;
+};
+
+export type GroupSendPayload = {
+  groupID: number;
+  content: string;
+};
+
+export type CreateGroupRequest = {
+  groupName: string;
+  members?: string[];
+};
+
+export type CreateGroupResponse = {
+  group: Group;
+};
+
+export type AddGroupMemberRequest = {
+  usernames: string[];
+};
+
+export type UploadResponse = {
+  file: FileAttachment;
 };
 
 export type SocketEvent<TPayload> = {
