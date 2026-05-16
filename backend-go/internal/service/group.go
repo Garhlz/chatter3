@@ -25,6 +25,13 @@ var (
 	ErrCannotRemoveOwner = errors.New("cannot remove the group owner")
 )
 
+// Group member role constants (matches DB CHECK constraint: 0=member, 1=admin, 2=owner).
+const (
+	GroupRoleMember = 0
+	GroupRoleAdmin  = 1
+	GroupRoleOwner  = 2
+)
+
 // GroupService owns group and group-message business rules.
 type GroupService struct {
 	queries  *sqlcgen.Queries
@@ -59,7 +66,7 @@ func (s *GroupService) CreateGroup(ctx context.Context, creatorUserID int64, cre
 	if err := s.queries.AddGroupMember(ctx, sqlcgen.AddGroupMemberParams{
 		GroupID: row.GroupID,
 		UserID:  creatorUserID,
-		Role:    2,
+		Role:    GroupRoleOwner,
 	}); err != nil {
 		return nil, err
 	}
@@ -80,7 +87,7 @@ func (s *GroupService) CreateGroup(ctx context.Context, creatorUserID int64, cre
 		if err := s.queries.AddGroupMember(ctx, sqlcgen.AddGroupMemberParams{
 			GroupID: row.GroupID,
 			UserID:  u.UserID,
-			Role:    0,
+			Role:    GroupRoleMember,
 		}); err != nil {
 			return nil, err
 		}
@@ -314,7 +321,7 @@ func (s *GroupService) AddMembers(ctx context.Context, callerUserID, groupID int
 	if err != nil {
 		return nil, err
 	}
-	if role < 1 {
+	if role < GroupRoleAdmin {
 		return nil, ErrNotGroupAdmin
 	}
 
@@ -333,7 +340,7 @@ func (s *GroupService) AddMembers(ctx context.Context, callerUserID, groupID int
 		if err := s.queries.AddGroupMember(ctx, sqlcgen.AddGroupMemberParams{
 			GroupID: groupID,
 			UserID:  u.UserID,
-			Role:    0,
+			Role:    GroupRoleMember,
 		}); err != nil {
 			return nil, err
 		}
@@ -367,7 +374,7 @@ func (s *GroupService) RemoveMember(ctx context.Context, callerUserID, groupID i
 		if err != nil {
 			return err
 		}
-		if callerRole < 1 {
+		if callerRole < GroupRoleAdmin {
 			return ErrNotGroupAdmin
 		}
 	}
@@ -382,7 +389,7 @@ func (s *GroupService) RemoveMember(ctx context.Context, callerUserID, groupID i
 	if err != nil {
 		return err
 	}
-	if targetRole == 2 {
+	if targetRole == GroupRoleOwner {
 		return ErrCannotRemoveOwner
 	}
 
