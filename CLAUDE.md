@@ -83,7 +83,7 @@ realtime/client.ts  -> WebSocket client
 hooks/              -> shared UI hooks
 ```
 
-The Tauri Rust layer currently handles desktop capabilities: tray, single-instance activation, notifications, window state, dialog/opener/process/store plugins. It does not currently own the HTTP/WebSocket chat protocol.
+The Tauri Rust layer currently handles desktop capabilities: tray, single-instance activation, notifications, window state, dialog/opener/process/store plugins, and local message persistence via SQLite (rusqlite bundled). It does not currently own the HTTP/WebSocket chat protocol.
 
 Token storage is OS credential-store backed in Tauri through the Rust `keyring` crate. This maps to Windows Credential Manager, macOS Keychain, and Linux Secret Service / libsecret. Browser dev still uses `localStorage`.
 
@@ -91,7 +91,7 @@ The Tauri path migrates legacy JWTs from the previous Tauri store or `localStora
 
 Language and theme preferences are persisted through the desktop abstraction: Tauri uses `tauri-plugin-store`, while browser dev uses `localStorage`.
 
-Local chat archives are also persisted through the desktop abstraction. The current implementation stores per-user snapshots of conversation metadata, recent messages, history cursors, and scroll positions in the Tauri store, then restores that snapshot before remote bootstrap refreshes public history and presence.
+Local chat messages are persisted to a SQLite database via `rusqlite` (bundled). The `db.rs` module exposes 7 Tauri commands (message insert/get/confirm/update-status, conversation upsert/get/update-unread) that the JS layer calls from `desktop.ts`. On startup, messages are loaded from SQLite for instant display before the HTTP history refresh; on each realtime message or send, a single row is inserted. Browser dev mode falls back to localStorage JSON blobs.
 
 Single-instance activation is implemented: repeat launches focus the existing main window instead of creating a second desktop session.
 

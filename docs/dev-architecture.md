@@ -78,10 +78,10 @@
 - 窗口状态事件：窗口聚焦/隐藏/恢复同步到前端，用于通知策略
 - 原生通知：新消息 OS 级推送，浏览器 Notification API fallback；当前仅非当前会话且窗口未聚焦/不可见时触发
 - 偏好与 Token 存储：Tauri 环境下用 `tauri-plugin-store` 持久化语言和主题；JWT 通过 Rust `keyring` 接系统凭据库，覆盖 Windows Credential Manager、macOS Keychain、Linux Secret Service / libsecret；启动时迁移旧 Tauri store 或旧 `localStorage` 中的 JWT，并删除旧位置 token
-- 本地聊天记录：前端按用户把会话列表、最近消息、分页 cursor 与滚动位置保存到桌面 store；启动时先恢复本地快照，再用远端公共历史、在线用户和群列表刷新当前状态
+- SQLite 本地消息持久化：通过 `rusqlite` bundle 在 `app_data_dir/chatter3.db` 存消息和会话表，带索引；7 个 Tauri commands 暴露 CRUD 操作；启动时从 SQLite 加载最近消息即时展示，再 HTTP 刷新合并；每条实时消息和 optimistic send 实时逐行写入；浏览器 dev 模式 fallback 到 localStorage JSON blob
 - 文件对话框（plugin-dialog）+ URL/文件打开（plugin-opener）
 
-已注册插件：`tauri-plugin-dialog`, `tauri-plugin-opener`, `tauri-plugin-process`, `tauri-plugin-notification`, `tauri-plugin-store`, `tauri-plugin-window-state`, `tauri-plugin-single-instance`；Rust 侧额外使用 `keyring` crate 访问系统凭据库
+已注册插件：`tauri-plugin-dialog`, `tauri-plugin-opener`, `tauri-plugin-process`, `tauri-plugin-notification`, `tauri-plugin-store`, `tauri-plugin-window-state`, `tauri-plugin-single-instance`；Rust 侧额外使用 `keyring` crate 访问系统凭据库，`rusqlite` (bundled) 管理本地聊天数据库 (`src-tauri/src/db.rs`)
 
 前端 JS 侧通过 `frontend/src/desktop.ts` 统一封装 Tauri 能力调用，包括偏好/token 存储、本地聊天记录快照、通知、托盘重连事件和窗口状态事件，带浏览器 fallback，确保 `npm run dev` 远程开发不受影响。
 

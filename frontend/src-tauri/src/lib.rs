@@ -1,3 +1,5 @@
+mod db;
+
 use tauri::{
     Emitter,
     menu::{Menu, MenuItem},
@@ -53,7 +55,6 @@ fn clear_desktop_token() -> Result<(), String> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            // 单实例：桌面 IM 重复启动时应该回到已有窗口，而不是创建第二套会话。
             show_main_window(app);
         }))
         .plugin(tauri_plugin_dialog::init())
@@ -65,10 +66,26 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             save_desktop_token,
             load_desktop_token,
-            clear_desktop_token
+            clear_desktop_token,
+            db::db_insert_message,
+            db::db_get_messages,
+            db::db_confirm_message,
+            db::db_update_message_status,
+            db::db_upsert_conversation,
+            db::db_get_conversations,
+            db::db_update_unread_count,
         ])
         .setup(|app| {
-            // 系统托盘：桌面 IM 最基本的行为——关闭窗口 ≠ 退出
+            // SQLite 本地聊天存储
+            let app_data_dir = app
+                .path()
+                .app_data_dir()
+                .expect("app data directory must be available");
+            let db_conn = db::open_or_create(app_data_dir)
+                .expect("failed to initialize local chat database");
+            app.manage(db_conn);
+
+            // 系统托盘
             let show_item = MenuItem::with_id(app, "show", "Show", true, None::<&str>)?;
             let reconnect_item =
                 MenuItem::with_id(app, "reconnect", "Reconnect", true, None::<&str>)?;
@@ -83,16 +100,12 @@ pub fn run() {
                 .icon(icon)
                 .menu(&menu)
                 .on_menu_event(|app, event| match event.id.as_ref() {
-                    "show" => {
-                        show_main_window(app);
-                    }
+                    "show" => show_main_window(app),
                     "reconnect" => {
                         show_main_window(app);
                         let _ = app.emit("desktop://reconnect", ());
                     }
-                    "quit" => {
-                        app.exit(0);
-                    }
+                    "quit" => app.exit(0),
                     _ => {}
                 })
                 .on_tray_icon_event(|tray, event| {
@@ -102,13 +115,12 @@ pub fn run() {
                         ..
                     } = event
                     {
-                        let app = tray.app_handle();
-                        show_main_window(app);
+                        show_main_window(tray.app_handle());
                     }
                 })
                 .build(app)?;
 
-            // 关闭窗口时隐藏到托盘，而不是退出
+            // 关闭窗口 → 隐藏到托盘
             if let Some(window) = app.get_webview_window("main") {
                 let window_clone = window.clone();
                 window.on_window_event(move |event| {

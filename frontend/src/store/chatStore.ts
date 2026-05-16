@@ -10,7 +10,12 @@ import {
   saveChatArchiveSnapshot,
   saveDesktopPreference,
   showNotification,
+  dbInsertMessage,
+  dbGetMessages,
+  dbGetConversations,
+  dbUpsertConversation,
   type DesktopWindowState,
+  type MessageRow,
 } from "../desktop";
 import {
   getInitialLanguage,
@@ -157,6 +162,118 @@ type PersistedChatArchive = {
 };
 
 let archivePersistTimer: number | null = null;
+
+function toMessageRow(
+  msg: ChatMessageView,
+  conversationId: string,
+): MessageRow {
+  return {
+    localId: msg.localId,
+    conversationId,
+    messageId: msg.messageId > 0 ? msg.messageId : null,
+    scope: msg.scope,
+    senderId: msg.sender.userId,
+    senderUsername: msg.sender.username,
+    senderNickname: msg.sender.nickname,
+    receiverUsername: msg.receiverUsername ?? null,
+    groupId: msg.groupID ?? null,
+    contentType: msg.contentType,
+    content: msg.content,
+    fileJson: msg.file ? JSON.stringify(msg.file) : null,
+    timestamp: msg.timestamp,
+    deliveryStatus: msg.deliveryStatus,
+    clientRequestId: msg.clientRequestId ?? null,
+    error: msg.error ?? null,
+  };
+}
+
+function persistMessage(msg: ChatMessageView, conversationId: string) {
+  fireAndForget(dbInsertMessage(toMessageRow(msg, conversationId)));
+}
+
+function persistConversation(cid: string, conv: Conversation) {
+  fireAndForget(
+    dbUpsertConversation({
+      id: cid,
+      scope: conv.scope,
+      title: conv.title,
+      peerUsername: conv.peerUsername,
+      groupId: conv.groupID ?? null,
+      description: conv.description,
+      lastMessage: conv.lastMessage ?? null,
+      updatedAt: conv.updatedAt ?? null,
+      unreadCount: conv.unreadCount,
+    }),
+  );
+}
+
+function messageRowToView(row: MessageRow): ChatMessageView {
+  return {
+    localId: row.localId,
+    messageId: row.messageId ?? 0,
+    scope: row.scope as ChatMessageView["scope"],
+    sender: {
+      userId: row.senderId ?? 0,
+      username: row.senderUsername,
+      nickname: row.senderNickname,
+    },
+    receiverUsername: row.receiverUsername ?? undefined,
+    groupID: row.groupId ?? undefined,
+    contentType: row.contentType as ChatMessageView["contentType"],
+    content: row.content,
+    file: row.fileJson ? (JSON.parse(row.fileJson) as ChatMessageView["file"]) : undefined,
+    timestamp: row.timestamp,
+    deliveryStatus: row.deliveryStatus as ChatMessageView["deliveryStatus"],
+    clientRequestId: row.clientRequestId ?? undefined,
+    error: row.error ?? undefined,
+  };
+}
+
+async function loadLocalMessages(): Promise<{
+  messagesByConversation: Record<string, ChatMessageView[]>;
+  conversations: Record<string, Conversation>;
+} | null> {
+  const convs = await dbGetConversations();
+  if (convs.length === 0) return null;
+
+  const messagesByConversation: Record<string, ChatMessageView[]> = {};
+  const conversations: Record<string, Conversation> = {};
+
+  for (const dbConv of convs) {
+    const cid = dbConv.id;
+    const rows = await dbGetMessages(cid, undefined, 50);
+    if (rows.length === 0) continue;
+
+    const views = rows
+      .map(messageRowToView)
+      .sort(
+        (a, b) =>
+          new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
+      );
+    messagesByConversation[cid] = views;
+
+    const last = views[views.length - 1];
+    conversations[cid] = {
+      id: cid,
+      scope: dbConv.scope as Conversation["scope"],
+      title: dbConv.title,
+      peerUsername: dbConv.peerUsername,
+      description: dbConv.description,
+      lastMessage: last.content,
+      updatedAt: last.timestamp,
+      unreadCount: dbConv.unreadCount,
+      groupID: dbConv.groupId ?? undefined,
+      memberCount: dbConv.scope === "group" ? dbConv.unreadCount : undefined,
+    };
+  }
+
+  if (!messagesByConversation[publicConversationId]) {
+    messagesByConversation[publicConversationId] = initialMessages;
+    conversations[publicConversationId] = publicConversation(initialMessages);
+  }
+
+  return { messagesByConversation, conversations };
+}
 
 function isUnauthorizedError(err: unknown) {
   return (
@@ -506,6 +623,7 @@ function ingestRealtimeMessage(message: ChatMessage, requestId?: string) {
           : `${message.sender.nickname}`;
       showNotification(title, message.content);
     }
+    persistMessage(incoming, cid);
     return {
       messagesByConversation: { ...state.messagesByConversation, [cid]: next },
       conversations: {
@@ -612,9 +730,21 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({ error: "", authExpired: false, notice: "", reconnectAttempt: 0 });
     try {
       const response = await api.login(get().loginForm);
-      const archivedState = restoreChatArchiveSnapshot(
-        await loadChatArchiveSnapshot<PersistedChatArchive>(response.user.username),
-      );
+
+      // 优先从 SQLite 加载本地消息，fallback 到 JSON blob archive
+      let localState = await loadLocalMessages();
+      if (!localState) {
+        const archived = restoreChatArchiveSnapshot(
+          await loadChatArchiveSnapshot<PersistedChatArchive>(response.user.username),
+        );
+        if (archived) {
+          localState = {
+            messagesByConversation: archived.messagesByConversation,
+            conversations: archived.conversations,
+          };
+        }
+      }
+
       const [historyPage, users, groups] = await Promise.all([
         api.getPublicHistoryPage(response.token),
         api.getOnlineUsers(response.token),
@@ -630,7 +760,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
           historyPage.nextCursor,
           users,
           groups,
-          archivedState,
+          localState
+            ? {
+                activeConversationId: publicConversationId,
+                messagesByConversation: localState.messagesByConversation,
+                conversations: localState.conversations,
+                historyCursors: {},
+                scrollPositions: {},
+                historyTarget: "",
+              }
+            : undefined,
         ),
       });
 
@@ -853,7 +992,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
         },
       };
     });
-    if (sent) scheduleSendTimeout(cid, optimistic.localId);
+    if (sent) {
+      scheduleSendTimeout(cid, optimistic.localId);
+      persistMessage(
+        { ...optimistic, deliveryStatus: "sending" },
+        cid,
+      );
+    }
   },
   retryMessage: (localId) => {
     const state = get();
@@ -1031,17 +1176,26 @@ export const useChatStore = create<ChatState>((set, get) => ({
       return;
     }
 
-    const archivedState = restoreChatArchiveSnapshot(
-      await loadChatArchiveSnapshot<PersistedChatArchive>(storedUser.username),
-    );
+    let localState = await loadLocalMessages();
+    if (!localState) {
+      const archived = restoreChatArchiveSnapshot(
+        await loadChatArchiveSnapshot<PersistedChatArchive>(storedUser.username),
+      );
+      if (archived) {
+        localState = {
+          messagesByConversation: archived.messagesByConversation,
+          conversations: archived.conversations,
+        };
+      }
+    }
 
     set({
       token: storedToken,
       currentUser: storedUser,
       authExpired: false,
       error: "",
-      ...(archivedState ?? {}),
-      notice: archivedState
+      ...(localState ?? {}),
+      notice: localState
         ? t(get().language, "notice.localArchiveLoaded")
         : t(get().language, "notice.restoreSession"),
       reconnectAttempt: 0,
@@ -1061,7 +1215,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
           historyPage.nextCursor,
           users,
           groups,
-          archivedState,
+          localState
+            ? {
+                activeConversationId: publicConversationId,
+                messagesByConversation: localState.messagesByConversation,
+                conversations: localState.conversations,
+                historyCursors: {},
+                scrollPositions: {},
+                historyTarget: "",
+              }
+            : undefined,
         ),
         notice: t(get().language, "notice.sessionRestored"),
       });
@@ -1077,7 +1240,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
       set({
         error: err instanceof Error ? err.message : t(get().language, "error.restoreSession"),
-        notice: archivedState
+        notice: localState
           ? t(get().language, "notice.localArchiveLoaded")
           : "",
       });
