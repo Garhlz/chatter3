@@ -1,12 +1,29 @@
 import { create } from "zustand";
 import { createAPIClient, APIClientError } from "../api/client";
 import { httpBaseURL, wsBaseURL } from "../config";
-import { saveToken, clearToken, loadToken, showNotification } from "../desktop";
-import { getInitialLanguage, persistLanguage, t, type Language } from "../i18n";
+import {
+  saveToken,
+  clearToken,
+  loadToken,
+  loadChatArchiveSnapshot,
+  loadDesktopPreference,
+  saveChatArchiveSnapshot,
+  saveDesktopPreference,
+  showNotification,
+  type DesktopWindowState,
+} from "../desktop";
+import {
+  getInitialLanguage,
+  LANGUAGE_KEY,
+  persistLanguage,
+  t,
+  type Language,
+} from "../i18n";
 import { createRealtimeClient, type RealtimeStatus } from "../realtime/client";
 import {
   applyResolvedTheme,
   getInitialThemeMode,
+  THEME_KEY,
   persistThemeMode,
   resolveThemeMode,
   type ResolvedTheme,
@@ -63,7 +80,9 @@ type ChatState = {
   groups: Group[];
   newGroupName: string;
   newGroupMembers: string;
-  uploadingFile: boolean;
+  uploadingCount: number;
+  windowFocused: boolean;
+  windowVisible: boolean;
   setLoginForm: (patch: Partial<LoginRequest>) => void;
   setRegisterForm: (patch: Partial<RegisterRequest>) => void;
   setHistoryTarget: (historyTarget: string) => void;
@@ -95,12 +114,22 @@ type ChatState = {
   setLanguage: (language: Language) => void;
   setThemeMode: (themeMode: ThemeMode) => void;
   setResolvedTheme: (resolvedTheme: ResolvedTheme) => void;
+  setDesktopWindowState: (windowState: DesktopWindowState) => void;
+  hydrateDesktopPreferences: () => Promise<void>;
 };
 
 const api = createAPIClient(httpBaseURL);
 const realtime = createRealtimeClient(wsBaseURL);
+
+// 防火墙：异步副作用不需要阻塞时用来包裹，阻止 unhandled rejection
+function fireAndForget(p: Promise<unknown>) {
+  p.catch(() => {});
+}
 const initialThemeMode = getInitialThemeMode();
 const initialResolvedTheme = resolveThemeMode(initialThemeMode);
+const CHAT_ARCHIVE_VERSION = 1;
+const MAX_ARCHIVE_MESSAGES_PER_CONVERSATION = 200;
+const ARCHIVE_PERSIST_DELAY_MS = 400;
 
 applyResolvedTheme(initialResolvedTheme);
 
@@ -115,11 +144,204 @@ const initialMessages = normalizeMessages([
   },
 ]);
 
+type PersistedChatArchive = {
+  version: number;
+  cachedAt: string;
+  username: string;
+  activeConversationId: string;
+  messagesByConversation: Record<string, ChatMessageView[]>;
+  conversations: Record<string, Conversation>;
+  historyCursors: Record<string, string | undefined>;
+  scrollPositions: Record<string, number>;
+  historyTarget: string;
+};
+
+let archivePersistTimer: number | null = null;
+
 function isUnauthorizedError(err: unknown) {
   return (
     err instanceof APIClientError &&
     (err.status === 401 || err.code === "unauthorized")
   );
+}
+
+function trimArchiveMessages(
+  messagesByConversation: Record<string, ChatMessageView[]>,
+) {
+  return Object.fromEntries(
+    Object.entries(messagesByConversation).map(([conversationId, messages]) => [
+      conversationId,
+      messages.slice(-MAX_ARCHIVE_MESSAGES_PER_CONVERSATION),
+    ]),
+  );
+}
+
+function buildChatArchiveSnapshot(
+  state: ChatState,
+): PersistedChatArchive | null {
+  if (!state.currentUser) {
+    return null;
+  }
+
+  return {
+    version: CHAT_ARCHIVE_VERSION,
+    cachedAt: new Date().toISOString(),
+    username: state.currentUser.username,
+    activeConversationId: state.activeConversationId,
+    messagesByConversation: trimArchiveMessages(state.messagesByConversation),
+    conversations: state.conversations,
+    historyCursors: state.historyCursors,
+    scrollPositions: state.scrollPositions,
+    historyTarget: state.historyTarget,
+  };
+}
+
+function restoreChatArchiveSnapshot(
+  snapshot: PersistedChatArchive | null,
+): Pick<
+  ChatState,
+  | "activeConversationId"
+  | "messagesByConversation"
+  | "conversations"
+  | "historyCursors"
+  | "scrollPositions"
+  | "historyTarget"
+> | null {
+  if (
+    !snapshot ||
+    snapshot.version !== CHAT_ARCHIVE_VERSION ||
+    typeof snapshot !== "object" ||
+    !snapshot.messagesByConversation ||
+    !snapshot.conversations
+  ) {
+    return null;
+  }
+
+  const publicMessages =
+    snapshot.messagesByConversation[publicConversationId] ?? initialMessages;
+  const conversations: Record<string, Conversation> = {
+    ...snapshot.conversations,
+    [publicConversationId]:
+      snapshot.conversations[publicConversationId] ??
+      publicConversation(publicMessages),
+  };
+  const activeConversationId = conversations[snapshot.activeConversationId]
+    ? snapshot.activeConversationId
+    : publicConversationId;
+
+  return {
+    activeConversationId,
+    messagesByConversation: {
+      ...snapshot.messagesByConversation,
+      [publicConversationId]: publicMessages,
+    },
+    conversations,
+    historyCursors: snapshot.historyCursors ?? {},
+    scrollPositions: snapshot.scrollPositions ?? {},
+    historyTarget: snapshot.historyTarget ?? "",
+  };
+}
+
+function mergeConversationState(
+  base: Record<string, Conversation>,
+  archived?: Record<string, Conversation>,
+) {
+  if (!archived) {
+    return base;
+  }
+
+  const merged = { ...archived };
+  for (const [conversationId, conversation] of Object.entries(base)) {
+    const cached = archived[conversationId];
+    merged[conversationId] = cached
+      ? {
+          ...cached,
+          ...conversation,
+          lastMessage: cached.lastMessage ?? conversation.lastMessage,
+          updatedAt: cached.updatedAt ?? conversation.updatedAt,
+          unreadCount: cached.unreadCount,
+          members: cached.members ?? conversation.members,
+          description: cached.description || conversation.description,
+        }
+      : conversation;
+  }
+  return merged;
+}
+
+function buildSessionConversations(
+  publicMessages: ChatMessageView[],
+  users: OnlineUser[],
+  groups: Group[],
+  archivedConversations?: Record<string, Conversation>,
+) {
+  const conversations: Record<string, Conversation> = {
+    [publicConversationId]: publicConversation(publicMessages),
+  };
+  for (const user of users) {
+    conversations[conversationIdFor("private", user.username)] =
+      privateConversation(user.username, user.online);
+  }
+  for (const group of groups) {
+    conversations[conversationIdFor("group", String(group.groupID))] =
+      groupConversation(group);
+  }
+  return mergeConversationState(conversations, archivedConversations);
+}
+
+function buildSessionStateFromServer(
+  publicMessages: ChatMessageView[],
+  publicHistoryCursor: string | undefined,
+  users: OnlineUser[],
+  groups: Group[],
+  archivedState?: ReturnType<typeof restoreChatArchiveSnapshot>,
+) {
+  const messagesByConversation = {
+    ...(archivedState?.messagesByConversation ?? {}),
+    [publicConversationId]: publicMessages,
+  };
+  const conversations = buildSessionConversations(
+    publicMessages,
+    users,
+    groups,
+    archivedState?.conversations,
+  );
+  const historyCursors = {
+    ...(archivedState?.historyCursors ?? {}),
+    [publicConversationId]: publicHistoryCursor,
+  };
+  const activeConversationId = conversations[
+    archivedState?.activeConversationId ?? publicConversationId
+  ]
+    ? (archivedState?.activeConversationId ?? publicConversationId)
+    : publicConversationId;
+
+  return {
+    activeConversationId,
+    messagesByConversation,
+    historyCursors,
+    conversations,
+    scrollPositions: archivedState?.scrollPositions ?? {},
+    historyTarget: archivedState?.historyTarget ?? "",
+    onlineUsers: users,
+    groups,
+  };
+}
+
+function scheduleArchivePersist(state: ChatState) {
+  if (!state.currentUser) {
+    return;
+  }
+  if (archivePersistTimer !== null) {
+    window.clearTimeout(archivePersistTimer);
+  }
+  archivePersistTimer = window.setTimeout(() => {
+    archivePersistTimer = null;
+    const snapshot = buildChatArchiveSnapshot(useChatStore.getState());
+    if (!snapshot) {
+      return;
+    }
+    fireAndForget(saveChatArchiveSnapshot(snapshot.username, snapshot));
+  }, ARCHIVE_PERSIST_DELAY_MS);
 }
 
 function localized(key: Parameters<typeof t>[1], params?: Parameters<typeof t>[2]) {
@@ -128,7 +350,7 @@ function localized(key: Parameters<typeof t>[1], params?: Parameters<typeof t>[2
 
 function expireSession(message?: string) {
   realtime.disconnect();
-  void clearToken();
+  fireAndForget(clearToken());
   useChatStore.setState({
     token: "",
     currentUser: null,
@@ -273,7 +495,11 @@ function ingestRealtimeMessage(message: ChatMessage, requestId?: string) {
             })
           : privateConversation(peer, true));
     const isActive = state.activeConversationId === cid;
-    if (!isActive && message.content) {
+    if (
+      !isActive &&
+      message.content &&
+      (!state.windowFocused || !state.windowVisible)
+    ) {
       const title =
         message.scope === "public"
           ? "Public Lobby"
@@ -321,13 +547,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
   groups: [],
   newGroupName: "",
   newGroupMembers: "",
-  uploadingFile: false,
+  uploadingCount: 0,
+  windowFocused: true,
+  windowVisible: true,
   setLanguage: (language) => {
     persistLanguage(language);
+    fireAndForget(saveDesktopPreference(LANGUAGE_KEY, language));
     set({ language });
   },
   setThemeMode: (themeMode) => {
     persistThemeMode(themeMode);
+    fireAndForget(saveDesktopPreference(THEME_KEY, themeMode));
     const resolvedTheme = resolveThemeMode(themeMode);
     applyResolvedTheme(resolvedTheme);
     set({ themeMode, resolvedTheme });
@@ -335,6 +565,32 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setResolvedTheme: (resolvedTheme) => {
     applyResolvedTheme(resolvedTheme);
     set({ resolvedTheme });
+  },
+  setDesktopWindowState: ({ focused, visible }) =>
+    set({ windowFocused: focused, windowVisible: visible }),
+  hydrateDesktopPreferences: async () => {
+    const [storedLanguage, storedThemeMode] = await Promise.all([
+      loadDesktopPreference(LANGUAGE_KEY),
+      loadDesktopPreference(THEME_KEY),
+    ]);
+
+    const patch: Partial<ChatState> = {};
+    if (storedLanguage === "zh-CN" || storedLanguage === "en-US") {
+      patch.language = storedLanguage;
+    }
+    if (
+      storedThemeMode === "system" ||
+      storedThemeMode === "latte" ||
+      storedThemeMode === "one-dark"
+    ) {
+      const resolvedTheme = resolveThemeMode(storedThemeMode);
+      applyResolvedTheme(resolvedTheme);
+      patch.themeMode = storedThemeMode;
+      patch.resolvedTheme = resolvedTheme;
+    }
+    if (Object.keys(patch).length > 0) {
+      set(patch);
+    }
   },
 
   setLoginForm: (patch) =>
@@ -356,36 +612,29 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set({ error: "", authExpired: false, notice: "", reconnectAttempt: 0 });
     try {
       const response = await api.login(get().loginForm);
+      const archivedState = restoreChatArchiveSnapshot(
+        await loadChatArchiveSnapshot<PersistedChatArchive>(response.user.username),
+      );
       const [historyPage, users, groups] = await Promise.all([
         api.getPublicHistoryPage(response.token),
         api.getOnlineUsers(response.token),
         api.listGroups(response.token),
       ]);
       const publicMessages = normalizeMessages(historyPage.data);
-      const conversations: Record<string, Conversation> = {
-        [publicConversationId]: publicConversation(publicMessages),
-      };
-      for (const user of users) {
-        conversations[conversationIdFor("private", user.username)] =
-          privateConversation(user.username, user.online);
-      }
-      for (const group of groups) {
-        conversations[conversationIdFor("group", String(group.groupID))] =
-          groupConversation(group);
-      }
 
       set({
         token: response.token,
         currentUser: response.user,
-        activeConversationId: publicConversationId,
-        messagesByConversation: { [publicConversationId]: publicMessages },
-        historyCursors: { [publicConversationId]: historyPage.nextCursor },
-        conversations,
-        onlineUsers: users,
-        groups,
+        ...buildSessionStateFromServer(
+          publicMessages,
+          historyPage.nextCursor,
+          users,
+          groups,
+          archivedState,
+        ),
       });
 
-      void saveToken(response.token);
+      fireAndForget(saveToken(response.token));
 
       realtime.connect(response.token, connectionHandlers(), {
         maxReconnectAttempts: 6,
@@ -555,16 +804,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const content = state.draft.trim();
     if (!content) return;
     if (!state.token || state.status !== "connected" || !state.currentUser) {
-      set({ error: t(state.language, "error.connectBeforeSend") });
+      set({ error: "Connect the realtime session before sending messages." });
       return;
     }
     const view = activeView(state.activeConversationId);
     if (view.scope === "private" && !view.peer) {
-      set({ error: t(state.language, "error.choosePrivate") });
+      set({ error: "Choose a private conversation before sending a direct message." });
       return;
     }
     if (view.scope === "group" && !view.groupID) {
-      set({ error: t(state.language, "error.selectGroup") });
+      set({ error: "Select a group before sending a message." });
       return;
     }
 
@@ -576,29 +825,34 @@ export const useChatStore = create<ChatState>((set, get) => ({
     else if (view.scope === "group") sent = realtime.sendGroupMessage({ groupID: view.groupID!, content }, requestId);
     else sent = realtime.sendPrivateMessage({ receiverUsername: view.peer, content }, requestId);
 
-    set((current) => ({
-      error: sent ? "" : t(current.language, "error.socketNotReady"),
-      draft: sent ? "" : current.draft,
-      messagesByConversation: {
-        ...current.messagesByConversation,
-        [cid]: mergeMessages(current.messagesByConversation[cid] ?? [], [
-          { ...optimistic, deliveryStatus: sent ? "sending" : "failed", error: sent ? undefined : t(current.language, "error.socketNotOpen") },
-        ]),
-      },
-      conversations: {
-        ...current.conversations,
-        [cid]: {
-          ...(current.conversations[cid] ??
-            (view.scope === "public"
-              ? publicConversation()
-              : view.scope === "group"
-                ? groupConversation({ groupID: view.groupID!, groupName: `Group ${view.groupID}`, creator: state.currentUser ?? { userId: 0, username: "unknown", nickname: "Unknown" }, memberCount: 0, createdAt: optimistic.timestamp })
-                : privateConversation(view.peer))),
-          lastMessage: content,
-          updatedAt: optimistic.timestamp,
+    // 在 set 回调内原子性地检查 draft，防止并发 sendMessage 读到同一值产生重复消息
+    set((current) => {
+      const currentDraft = current.draft.trim();
+      if (currentDraft !== content) return current;
+      return {
+        error: sent ? "" : "Realtime socket is not ready.",
+        draft: sent ? "" : current.draft,
+        messagesByConversation: {
+          ...current.messagesByConversation,
+          [cid]: mergeMessages(current.messagesByConversation[cid] ?? [], [
+            { ...optimistic, deliveryStatus: sent ? "sending" : "failed", error: sent ? undefined : "Socket is not open." },
+          ]),
         },
-      },
-    }));
+        conversations: {
+          ...current.conversations,
+          [cid]: {
+            ...(current.conversations[cid] ??
+              (view.scope === "public"
+                ? publicConversation()
+                : view.scope === "group"
+                  ? groupConversation({ groupID: view.groupID!, groupName: `Group ${view.groupID}`, creator: state.currentUser ?? { userId: 0, username: "unknown", nickname: "Unknown" }, memberCount: 0, createdAt: optimistic.timestamp })
+                  : privateConversation(view.peer))),
+            lastMessage: content,
+            updatedAt: optimistic.timestamp,
+          },
+        },
+      };
+    });
     if (sent) scheduleSendTimeout(cid, optimistic.localId);
   },
   retryMessage: (localId) => {
@@ -675,7 +929,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
         return { groups, conversations };
       });
     } catch (err) {
-      if (isUnauthorizedError(err)) expireSession();
+      if (isUnauthorizedError(err)) { expireSession(); return; }
+      set({ error: err instanceof Error ? err.message : "Failed to load groups" });
     }
   },
   loadGroupHistory: async (groupID) => {
@@ -718,7 +973,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
   addGroupMembers: async (groupID, usernames) => {
     const { token } = get();
-    if (!token) return;
+    if (!token) { set({ error: "Log in before managing group members." }); return; }
     try {
       set({ error: "" });
       await api.addGroupMembers(token, groupID, { usernames });
@@ -731,7 +986,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
   removeGroupMember: async (groupID, username) => {
     const { token } = get();
-    if (!token) return;
+    if (!token) { set({ error: "Log in before managing group members." }); return; }
     try {
       set({ error: "" });
       await api.removeGroupMember(token, groupID, username);
@@ -746,14 +1001,21 @@ export const useChatStore = create<ChatState>((set, get) => ({
   // ── File ──
   uploadFile: async (file, receiverUsername) => {
     const { token } = get();
-    if (!token) { set({ error: t(get().language, "error.loginBeforeUpload") }); return; }
+    if (!token) { set({ error: "Log in before uploading files." }); return; }
     try {
-      set({ error: "", uploadingFile: true, lastSelectedFile: file.name });
+      set((s) => ({ error: "", uploadingCount: s.uploadingCount + 1, lastSelectedFile: file.name }));
       await api.uploadFile(token, file, receiverUsername);
-      set({ uploadingFile: false, lastSelectedFile: "", notice: t(get().language, "notice.fileUploaded", { name: file.name }) });
+      set((s) => ({
+        uploadingCount: s.uploadingCount - 1,
+        lastSelectedFile: "",
+        notice: `File "${file.name}" uploaded.`,
+      }));
     } catch (err) {
       if (isUnauthorizedError(err)) { expireSession(); return; }
-      set({ error: err instanceof Error ? err.message : t(get().language, "error.uploadFile"), uploadingFile: false });
+      set((s) => ({
+        error: err instanceof Error ? err.message : "Failed to upload file",
+        uploadingCount: s.uploadingCount - 1,
+      }));
     }
   },
 
@@ -769,12 +1031,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
       return;
     }
 
+    const archivedState = restoreChatArchiveSnapshot(
+      await loadChatArchiveSnapshot<PersistedChatArchive>(storedUser.username),
+    );
+
     set({
       token: storedToken,
       currentUser: storedUser,
       authExpired: false,
       error: "",
-      notice: t(get().language, "notice.restoreSession"),
+      ...(archivedState ?? {}),
+      notice: archivedState
+        ? t(get().language, "notice.localArchiveLoaded")
+        : t(get().language, "notice.restoreSession"),
       reconnectAttempt: 0,
     });
 
@@ -785,25 +1054,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
         api.listGroups(storedToken),
       ]);
       const publicMessages = normalizeMessages(historyPage.data);
-      const conversations: Record<string, Conversation> = {
-        [publicConversationId]: publicConversation(publicMessages),
-      };
-      for (const user of users) {
-        conversations[conversationIdFor("private", user.username)] =
-          privateConversation(user.username, user.online);
-      }
-      for (const group of groups) {
-        conversations[conversationIdFor("group", String(group.groupID))] =
-          groupConversation(group);
-      }
 
       set({
-        activeConversationId: publicConversationId,
-        messagesByConversation: { [publicConversationId]: publicMessages },
-        historyCursors: { [publicConversationId]: historyPage.nextCursor },
-        conversations,
-        onlineUsers: users,
-        groups,
+        ...buildSessionStateFromServer(
+          publicMessages,
+          historyPage.nextCursor,
+          users,
+          groups,
+          archivedState,
+        ),
         notice: t(get().language, "notice.sessionRestored"),
       });
 
@@ -818,13 +1077,30 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
       set({
         error: err instanceof Error ? err.message : t(get().language, "error.restoreSession"),
-        notice: "",
+        notice: archivedState
+          ? t(get().language, "notice.localArchiveLoaded")
+          : "",
       });
     }
   },
 
   clearError: () => set({ error: "", authExpired: false }),
 }));
+
+useChatStore.subscribe((state, previous) => {
+  if (
+    state.currentUser?.username !== previous.currentUser?.username ||
+    state.activeConversationId !== previous.activeConversationId ||
+    state.historyTarget !== previous.historyTarget ||
+    state.messagesByConversation !== previous.messagesByConversation ||
+    state.conversations !== previous.conversations ||
+    state.historyCursors !== previous.historyCursors ||
+    state.scrollPositions !== previous.scrollPositions ||
+    state.groups !== previous.groups
+  ) {
+    scheduleArchivePersist(state);
+  }
+});
 
 export { publicConversation };
 
