@@ -164,8 +164,8 @@ func (m *Manager) OnlineSnapshots() []Snapshot {
 
 // Broadcast 向除 excludeUsername 之外的所有在线会话写入消息（非阻塞）。
 func (m *Manager) Broadcast(msg []byte, excludeUsername string) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	for uname, s := range m.byUser {
 		if uname == excludeUsername {
 			continue
@@ -180,8 +180,8 @@ func (m *Manager) Broadcast(msg []byte, excludeUsername string) {
 
 // SendToUsers 向指定用户名列表中的所有在线会话写入消息（非阻塞）。
 func (m *Manager) SendToUsers(msg []byte, usernames []string) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	for _, uname := range usernames {
 		if s, ok := m.byUser[uname]; ok {
 			select {
@@ -193,17 +193,20 @@ func (m *Manager) SendToUsers(msg []byte, usernames []string) {
 }
 
 // Send 向指定用户发送消息（非阻塞）。
+// 持有写锁直到 channel write 完成，避免并发 Shutdown 关闭 channel 导致 panic。
 func (m *Manager) Send(username string, msg []byte) bool {
-	m.mu.RLock()
+	m.mu.Lock()
 	s, ok := m.byUser[username]
-	m.mu.RUnlock()
 	if !ok {
+		m.mu.Unlock()
 		return false
 	}
 	select {
 	case s.Send <- msg:
+		m.mu.Unlock()
 		return true
 	default:
+		m.mu.Unlock()
 		return false
 	}
 }
