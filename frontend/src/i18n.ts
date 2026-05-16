@@ -104,6 +104,7 @@ type TranslationKey =
   | "notice.memberRemoved"
   | "notice.fileUploaded"
   | "notice.restoreSession"
+  | "notice.localArchiveLoaded"
   | "notice.sessionRestored"
   | "error.sessionExpired"
   | "error.noConfirmation"
@@ -239,6 +240,7 @@ const dictionaries: Record<Language, Record<TranslationKey, string>> = {
     "notice.memberRemoved": "已移除 {name}。",
     "notice.fileUploaded": "文件「{name}」已上传。",
     "notice.restoreSession": "正在恢复已保存会话...",
+    "notice.localArchiveLoaded": "已加载本地聊天记录，正在同步远端状态。",
     "notice.sessionRestored": "已恢复保存的会话。",
     "error.sessionExpired": "会话已过期，请重新登录。",
     "error.noConfirmation": "未收到实时确认。",
@@ -373,6 +375,7 @@ const dictionaries: Record<Language, Record<TranslationKey, string>> = {
     "notice.memberRemoved": "Removed {name}.",
     "notice.fileUploaded": "File \"{name}\" uploaded.",
     "notice.restoreSession": "Restoring saved session...",
+    "notice.localArchiveLoaded": "Local chat archive loaded. Syncing remote state.",
     "notice.sessionRestored": "Saved session restored.",
     "error.sessionExpired": "Session expired. Log in again.",
     "error.noConfirmation": "No realtime confirmation received.",
@@ -405,7 +408,7 @@ const dictionaries: Record<Language, Record<TranslationKey, string>> = {
   },
 };
 
-const LANGUAGE_KEY = "chatter3-language";
+export const LANGUAGE_KEY = "chatter3-language";
 
 export function getInitialLanguage(): Language {
   const stored = localStorage.getItem(LANGUAGE_KEY);
@@ -421,7 +424,7 @@ export function t(
   key: TranslationKey,
   params: Record<string, string | number> = {},
 ) {
-  let template = dictionaries[language][key] ?? dictionaries["zh-CN"][key];
+  let template = dictionaries[language][key] ?? dictionaries["zh-CN"][key] ?? `[${key}]`;
   for (const [name, value] of Object.entries(params)) {
     template = template.replaceAll(`{${name}}`, String(value));
   }

@@ -20,7 +20,8 @@ export function ChatPanel() {
   );
   const historyLoading = useChatStore((state) => state.historyLoading);
   const lastSelectedFile = useChatStore((state) => state.lastSelectedFile);
-  const uploadingFile = useChatStore((state) => state.uploadingFile);
+  const uploadingCount = useChatStore((state) => state.uploadingCount);
+  const uploadingFile = uploadingCount > 0;
   const messages = useChatStore(useShallow(selectActiveMessages));
   const activeConversation = useChatStore(useShallow(selectActiveConversation));
   const activeStats = useChatStore(useShallow(selectActiveStats));

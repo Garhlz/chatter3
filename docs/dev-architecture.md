@@ -71,16 +71,19 @@
 
 当前已落地（2026-05）：
 
-- 系统托盘：关闭窗口隐藏到托盘而非退出，左键点击显示/隐藏，右键菜单 Show/Quit
-- 单实例：尚未实现；当前重复启动不会自动激活已有窗口
+- 系统托盘：关闭窗口隐藏到托盘而非退出，左键点击显示/隐藏，右键菜单 Show/Reconnect/Quit
+- 单实例：重复启动会激活已有主窗口，避免创建第二套桌面会话
+- 托盘菜单：Show 激活主窗口，Reconnect 激活窗口并通知前端重连，Quit 退出应用
 - 窗口状态持久化：自动记住位置、大小、最大化状态，重启恢复
-- 原生通知：新消息 OS 级推送，浏览器 Notification API fallback
-- Token 存储：Tauri 环境下用 `tauri-plugin-store` 持久化，同时会镜像到 `localStorage`；当前未接系统级凭据库
+- 窗口状态事件：窗口聚焦/隐藏/恢复同步到前端，用于通知策略
+- 原生通知：新消息 OS 级推送，浏览器 Notification API fallback；当前仅非当前会话且窗口未聚焦/不可见时触发
+- 偏好与 Token 存储：Tauri 环境下用 `tauri-plugin-store` 持久化语言和主题；JWT 通过 Rust `keyring` 接系统凭据库，覆盖 Windows Credential Manager、macOS Keychain、Linux Secret Service / libsecret；启动时迁移旧 Tauri store 或旧 `localStorage` 中的 JWT，并删除旧位置 token
+- 本地聊天记录：前端按用户把会话列表、最近消息、分页 cursor 与滚动位置保存到桌面 store；启动时先恢复本地快照，再用远端公共历史、在线用户和群列表刷新当前状态
 - 文件对话框（plugin-dialog）+ URL/文件打开（plugin-opener）
 
-已注册插件：`tauri-plugin-dialog`, `tauri-plugin-opener`, `tauri-plugin-process`, `tauri-plugin-notification`, `tauri-plugin-store`, `tauri-plugin-window-state`
+已注册插件：`tauri-plugin-dialog`, `tauri-plugin-opener`, `tauri-plugin-process`, `tauri-plugin-notification`, `tauri-plugin-store`, `tauri-plugin-window-state`, `tauri-plugin-single-instance`；Rust 侧额外使用 `keyring` crate 访问系统凭据库
 
-前端 JS 侧通过 `frontend/src/desktop.ts` 统一封装 Tauri 能力调用，带浏览器 fallback，确保 `npm run dev` 远程开发不受影响。
+前端 JS 侧通过 `frontend/src/desktop.ts` 统一封装 Tauri 能力调用，包括偏好/token 存储、本地聊天记录快照、通知、托盘重连事件和窗口状态事件，带浏览器 fallback，确保 `npm run dev` 远程开发不受影响。
 
 设计原则：
 
@@ -270,8 +273,8 @@
 
 ## 6. 当前最合理的推进顺序
 
-1. 前端补齐手动重连、在线用户刷新、会话滚动位置等文本聊天体验
+1. 前端补齐文件下载桌面体验，包括选择保存位置、下载进度、打开文件和打开所在目录
 2. 后端补齐 WebSocket 事件路径测试
-3. 设计并稳定文件上传下载与文件消息事件
-4. 前端接文件消息 UI 与真实上传下载闭环
-5. 再评估群聊协议和持久化
+3. 设计并稳定群文件上传、删群、已读、撤回和多端同步协议
+4. 前端在协议稳定后接入对应 UI 和状态流
+5. 再评估是否把 HTTP/WebSocket 连接生命周期迁入 Tauri Rust 层

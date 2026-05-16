@@ -5,6 +5,10 @@ import { ChatPanel } from "./components/ChatPanel";
 import { ConversationList } from "./components/ConversationList";
 import { IdentityPanel } from "./components/IdentityPanel";
 import { TelemetryPanel } from "./components/TelemetryPanel";
+import {
+  listenDesktopReconnect,
+  listenDesktopWindowState,
+} from "./desktop";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { statusLabel, t } from "./i18n";
 import { useChatStore } from "./store/chatStore";
@@ -16,10 +20,21 @@ export function App() {
   const themeMode = useChatStore((state) => state.themeMode);
   const setResolvedTheme = useChatStore((state) => state.setResolvedTheme);
   const status = useChatStore((state) => state.status);
+  const reconnect = useChatStore((state) => state.reconnect);
+  const setDesktopWindowState = useChatStore(
+    (state) => state.setDesktopWindowState,
+  );
+  const hydrateDesktopPreferences = useChatStore(
+    (state) => state.hydrateDesktopPreferences,
+  );
   const disconnect = useChatStore((state) => state.disconnect);
   const bootstrapSession = useChatStore((state) => state.bootstrapSession);
 
   useKeyboardShortcuts();
+
+  useEffect(() => {
+    void hydrateDesktopPreferences();
+  }, [hydrateDesktopPreferences]);
 
   useEffect(() => {
     void bootstrapSession();
@@ -38,6 +53,27 @@ export function App() {
     }
     return watchSystemTheme(setResolvedTheme);
   }, [setResolvedTheme, themeMode]);
+
+  useEffect(() => {
+    let disposed = false;
+    let cleanupReconnect: (() => void) | undefined;
+    let cleanupWindowState: (() => void) | undefined;
+
+    void listenDesktopReconnect(() => reconnect()).then((cleanup) => {
+      if (disposed) cleanup();
+      else cleanupReconnect = cleanup;
+    }).catch(() => {});
+    void listenDesktopWindowState(setDesktopWindowState).then((cleanup) => {
+      if (disposed) cleanup();
+      else cleanupWindowState = cleanup;
+    }).catch(() => {});
+
+    return () => {
+      disposed = true;
+      cleanupReconnect?.();
+      cleanupWindowState?.();
+    };
+  }, [reconnect, setDesktopWindowState]);
 
   if (!currentUser) {
     return (

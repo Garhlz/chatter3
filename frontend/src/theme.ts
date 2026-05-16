@@ -1,7 +1,7 @@
 export type ThemeMode = "system" | "latte" | "one-dark";
 export type ResolvedTheme = "latte" | "one-dark";
 
-const THEME_KEY = "chatter3-theme";
+export const THEME_KEY = "chatter3-theme";
 const darkQuery = "(prefers-color-scheme: dark)";
 
 export function getInitialThemeMode(): ThemeMode {

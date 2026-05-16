@@ -107,11 +107,15 @@ npm run dev
 - 群聊创建、成员管理、群消息收发
 - 文件上传/下载与文件消息实时事件展示
 - 系统托盘（关闭窗口隐藏到托盘）
+- 单实例保护（重复启动激活已有窗口）
+- 托盘菜单显示主窗口、触发重连、退出
 - 窗口状态记忆（位置/大小重启恢复）
-- 原生 OS 通知（新消息浏览器内 Notification API fallback）
-- JWT token 本地持久化恢复（Tauri store，浏览器环境 fallback 到 localStorage）
+- 原生 OS 通知（仅非当前会话且窗口未聚焦/不可见时触发，浏览器内 Notification API fallback）
+- 语言、主题本地持久化恢复（Tauri store，浏览器环境 fallback 到 localStorage）
+- JWT token 安全持久化恢复（Tauri 环境走系统凭据库，浏览器开发 fallback 到 localStorage）
+- 本地聊天记录快照恢复（按用户缓存会话列表、最近消息、分页 cursor 与滚动位置）
 
-单实例保护、群文件上传、删群、已读、撤回和多端同步暂未实现。
+群文件上传、删群、已读、撤回和多端同步暂未实现。
 
 ## 当前设计方案
 
@@ -194,15 +198,20 @@ npm run dev
 
 **桌面能力（2026-05 新增）：**
 - 系统托盘（关闭窗口隐藏到托盘而非退出）
+- 单实例保护（重复启动激活已有窗口）
+- 托盘菜单动作：Show / Reconnect / Quit
 - 窗口状态持久化（位置/大小/最大化重启恢复）
-- 原生 OS 通知（`desktop.ts` 封装，浏览器 Notification API fallback）
-- JWT token 本地持久化恢复（Tauri store → localStorage fallback）
+- 窗口聚焦/隐藏/恢复事件同步到前端状态，用于通知策略
+- 原生 OS 通知（`desktop.ts` 封装，仅非当前会话且窗口未聚焦/不可见时触发，浏览器 Notification API fallback）
+- 语言、主题本地持久化恢复（Tauri store → 浏览器 localStorage fallback）
+- JWT token 安全持久化恢复（系统凭据库：Windows Credential Manager / macOS Keychain / Linux Secret Service）
+- Tauri 启动时会把旧 Tauri store 或旧 localStorage 中的 JWT 迁移到系统凭据库，并删除旧位置的 token
+- 本地聊天记录快照：按用户持久化最近会话与消息，启动时优先恢复本地记录，再用远端公共历史和在线状态覆盖刷新
 - URL/文件打开（plugin-opener）
 - 文件上传当前仍走浏览器 `File` 对象路径；原生文件读取桥接尚未接入
 
 当前前端还没有真正完成的部分：
 
-- 单实例保护（重复启动激活已有窗口）
 - 群文件上传（后端上传 API 缺 groupID 参数）
 - 删群（后端未实现 DELETE /api/v2/groups/{groupID}）
 - 已读 / 撤回 / 多端同步（协议未定义）
