@@ -1,7 +1,9 @@
 import { useState } from "react";
+import { t } from "../i18n";
 import { useChatStore } from "../store/chatStore";
 
 export function GroupPanel() {
+  const language = useChatStore((state) => state.language);
   const activeConversation = useChatStore((state) =>
     state.conversations[state.activeConversationId],
   );
@@ -44,14 +46,14 @@ export function GroupPanel() {
     <section className="panel group-panel">
       <header className="panel-header panel-header-tight">
         <div>
-          <p className="section-label">Group</p>
+          <p className="section-label">{t(language, "group.label")}</p>
           <h2>{activeConversation.title}</h2>
           <small>{activeConversation.description}</small>
         </div>
       </header>
 
       <div className="group-members">
-        <p className="section-label">Members ({members.length})</p>
+        <p className="section-label">{t(language, "group.members", { count: members.length })}</p>
         {members.map((member) => (
           <div key={member.user.username} className="member-row">
             <span
@@ -62,7 +64,11 @@ export function GroupPanel() {
             <div className="member-info">
               <strong>
                 {member.user.nickname}
-                {member.role === 2 ? " (owner)" : member.role === 1 ? " (admin)" : ""}
+                {member.role === 2
+                  ? ` (${t(language, "group.owner")})`
+                  : member.role === 1
+                    ? ` (${t(language, "group.admin")})`
+                    : ""}
               </strong>
               <small>@{member.user.username}</small>
             </div>
@@ -73,7 +79,7 @@ export function GroupPanel() {
                 onClick={() => handleRemoveMember(member.user.username)}
                 style={{ minHeight: 28, fontSize: "0.7rem" }}
               >
-                Remove
+                {t(language, "group.remove")}
               </button>
             )}
           </div>
@@ -81,8 +87,8 @@ export function GroupPanel() {
 
         {members.length === 0 && (
           <div className="placeholder-card">
-            <strong>No member data</strong>
-            <span>Reload group history to see members.</span>
+            <strong>{t(language, "group.noMembers")}</strong>
+            <span>{t(language, "group.noMembersHint")}</span>
           </div>
         )}
       </div>
@@ -93,7 +99,7 @@ export function GroupPanel() {
             value={addInput}
             onChange={(e) => setAddInput(e.target.value)}
             disabled={!token}
-            placeholder="Usernames to add (comma-separated)"
+            placeholder={t(language, "group.addPlaceholder")}
             style={{ minHeight: 36, fontSize: "0.82rem" }}
           />
           <button
@@ -102,7 +108,7 @@ export function GroupPanel() {
             disabled={!addInput.trim() || !token}
             onClick={handleAddMembers}
           >
-            Add members
+            {t(language, "group.addMembers")}
           </button>
         </div>
       )}

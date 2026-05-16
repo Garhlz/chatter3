@@ -1,6 +1,8 @@
+import { t } from "../i18n";
 import { useChatStore } from "../store/chatStore";
 
 export function ArchiveTools() {
+  const language = useChatStore((state) => state.language);
   const historyTarget = useChatStore((state) => state.historyTarget);
   const setHistoryTarget = useChatStore((state) => state.setHistoryTarget);
   const loadPublicHistory = useChatStore((state) => state.loadPublicHistory);
@@ -10,8 +12,8 @@ export function ArchiveTools() {
     <section className="panel tools-panel">
       <header className="panel-header panel-header-tight">
         <div>
-          <p className="section-label">Archive</p>
-          <h2>Manual lookup</h2>
+          <p className="section-label">{t(language, "archive.label")}</p>
+          <h2>{t(language, "archive.title")}</h2>
         </div>
       </header>
       <button
@@ -19,10 +21,10 @@ export function ArchiveTools() {
         className="secondary-button"
         onClick={() => void loadPublicHistory()}
       >
-        Reload public history
+        {t(language, "archive.reloadPublic")}
       </button>
       <label>
-        Private history username
+        {t(language, "archive.privateUsername")}
         <input
           data-private-history-input
           value={historyTarget}
@@ -35,7 +37,7 @@ export function ArchiveTools() {
         className="secondary-button"
         onClick={() => void loadPrivateHistory()}
       >
-        Load direct messages
+        {t(language, "archive.loadDirect")}
       </button>
     </section>
   );

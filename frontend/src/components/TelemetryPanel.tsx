@@ -1,7 +1,9 @@
 import { httpBaseURL, wsBaseURL } from "../config";
+import { statusLabel, t } from "../i18n";
 import { useChatStore } from "../store/chatStore";
 
 export function TelemetryPanel() {
+  const language = useChatStore((state) => state.language);
   const token = useChatStore((state) => state.token);
   const status = useChatStore((state) => state.status);
   const reconnect = useChatStore((state) => state.reconnect);
@@ -9,16 +11,13 @@ export function TelemetryPanel() {
 
   return (
     <section className="panel telemetry-panel">
-      <p className="section-label">Telemetry</p>
+      <p className="section-label">{t(language, "telemetry.title")}</p>
       <div className="connection-summary">
         <div>
           <span className={`status-dot status-${status}`} />
-          <strong>{status}</strong>
+          <strong>{statusLabel(language, status)}</strong>
         </div>
-        <small>
-          HTTP primes history. WebSocket streams presence and realtime message
-          flow.
-        </small>
+        <small>{t(language, "telemetry.summary")}</small>
       </div>
       <div className="telemetry-actions">
         <button
@@ -27,7 +26,7 @@ export function TelemetryPanel() {
           disabled={!token}
           onClick={reconnect}
         >
-          Reconnect
+          {t(language, "telemetry.reconnect")}
         </button>
         <button
           type="button"
@@ -35,7 +34,7 @@ export function TelemetryPanel() {
           disabled={!token}
           onClick={() => void refreshOnlineUsers()}
         >
-          Refresh users
+          {t(language, "telemetry.refreshUsers")}
         </button>
       </div>
       <div className="detail-grid">
@@ -49,7 +48,7 @@ export function TelemetryPanel() {
         </div>
         <div>
           <span>TOKEN</span>
-          <code>{token ? "present" : "missing"}</code>
+          <code>{token ? t(language, "telemetry.tokenPresent") : t(language, "telemetry.tokenMissing")}</code>
         </div>
       </div>
     </section>
