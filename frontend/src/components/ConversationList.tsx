@@ -1,10 +1,40 @@
 import { useShallow } from "zustand/shallow";
+import { t, type Language } from "../i18n";
 import {
   selectConversationList,
   useChatStore,
 } from "../store/chatStore";
+import type { Conversation } from "../store/helpers";
+
+function conversationTitle(language: Language, conversation: Conversation) {
+  if (conversation.scope === "public") {
+    return t(language, "chat.publicTitle");
+  }
+  if (conversation.scope === "private") {
+    return t(language, "chat.directTitle", { name: conversation.peerUsername });
+  }
+  return conversation.title;
+}
+
+function conversationDescription(language: Language, conversation: Conversation) {
+  if (conversation.scope === "public") {
+    return language === "zh-CN" ? "公共消息频道" : "Shared broadcast channel";
+  }
+  if (conversation.scope === "private") {
+    return language === "zh-CN"
+      ? `与 @${conversation.peerUsername} 的私聊`
+      : `Private conversation with @${conversation.peerUsername}`;
+  }
+  if (conversation.memberCount !== undefined) {
+    return language === "zh-CN"
+      ? `${conversation.memberCount} 位成员`
+      : conversation.description;
+  }
+  return conversation.description;
+}
 
 export function ConversationList() {
+  const language = useChatStore((state) => state.language);
   const token = useChatStore((state) => state.token);
   const onlineUsers = useChatStore((state) => state.onlineUsers);
   const activeConversationId = useChatStore((state) => state.activeConversationId);
@@ -21,8 +51,8 @@ export function ConversationList() {
     <section className="panel session-panel">
       <header className="panel-header">
         <div>
-          <p className="section-label">Channels</p>
-          <h2>Conversation stack</h2>
+          <p className="section-label">{t(language, "conversations.label")}</p>
+          <h2>{t(language, "conversations.title")}</h2>
         </div>
         <span className="count-badge">{onlineUsers.length}</span>
       </header>
@@ -44,10 +74,10 @@ export function ConversationList() {
                 conversation.online === false ? "channel-pulse-muted" : ""
               }`}
             />
-            <strong>{conversation.title}</strong>
+            <strong>{conversationTitle(language, conversation)}</strong>
             <small>
               {conversation.lastMessage ??
-                (token ? conversation.description : "login required")}
+                (token ? conversationDescription(language, conversation) : t(language, "conversations.loginRequired"))}
             </small>
             {conversation.unreadCount > 0 ? (
               <em>{conversation.unreadCount}</em>
@@ -56,7 +86,7 @@ export function ConversationList() {
         ))}
 
         <div className="channel-group-label">
-          Groups
+          {t(language, "conversations.groups")}
           <button
             type="button"
             className="secondary-button compact-button"
@@ -64,7 +94,7 @@ export function ConversationList() {
             disabled={!token}
             onClick={() => void loadGroups()}
           >
-            Refresh
+            {t(language, "conversations.refresh")}
           </button>
         </div>
 
@@ -73,7 +103,7 @@ export function ConversationList() {
             value={newGroupName}
             onChange={(e) => setNewGroupName(e.target.value)}
             disabled={!token}
-            placeholder="Group name"
+            placeholder={t(language, "conversations.groupName")}
             data-group-name-input
             style={{ minHeight: 36, fontSize: "0.82rem" }}
           />
@@ -81,7 +111,7 @@ export function ConversationList() {
             value={newGroupMembers}
             onChange={(e) => setNewGroupMembers(e.target.value)}
             disabled={!token}
-            placeholder="Members (comma-separated)"
+            placeholder={t(language, "conversations.groupMembers")}
             style={{ minHeight: 36, fontSize: "0.82rem" }}
           />
           <button
@@ -90,7 +120,7 @@ export function ConversationList() {
             disabled={!token || !newGroupName.trim()}
             onClick={() => void createGroup()}
           >
-            New group
+            {t(language, "conversations.newGroup")}
           </button>
         </div>
       </div>

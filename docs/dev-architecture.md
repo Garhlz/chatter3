@@ -24,7 +24,7 @@
 - 登录 / 注册 / 历史拉取的 HTTP 路径
 - 远程开发下通过 `Vite proxy` 访问后端
 - `realtime client`
-- 基于 `Terminal Neon` 的桌面客户端主界面重构
+- 基于 `Workbench` 的桌面客户端主界面重构，并接入默认中文、偏暖 `Catppuccin Latte` / `One Dark` 双主题和跟随系统模式
 - 公共消息 / 私聊消息的基础发送 UI
 - `zustand` 状态层
 - 前端派生会话列表
@@ -69,22 +69,24 @@
 
 - `frontend/src-tauri/`
 
-职责：
+当前已落地（2026-05）：
 
-- 提供桌面壳
-- 提供文件选择、打开文件等原生能力边界
-- 确保桌面应用可以打包与启动
+- 系统托盘：关闭窗口隐藏到托盘而非退出，左键点击显示/隐藏，右键菜单 Show/Quit
+- 单实例：尚未实现；当前重复启动不会自动激活已有窗口
+- 窗口状态持久化：自动记住位置、大小、最大化状态，重启恢复
+- 原生通知：新消息 OS 级推送，浏览器 Notification API fallback
+- Token 存储：Tauri 环境下用 `tauri-plugin-store` 持久化，同时会镜像到 `localStorage`；当前未接系统级凭据库
+- 文件对话框（plugin-dialog）+ URL/文件打开（plugin-opener）
 
-不负责：
+已注册插件：`tauri-plugin-dialog`, `tauri-plugin-opener`, `tauri-plugin-process`, `tauri-plugin-notification`, `tauri-plugin-store`, `tauri-plugin-window-state`
 
-- 聊天主协议
-- HTTP / WebSocket 业务编排
-- 消息状态管理
+前端 JS 侧通过 `frontend/src/desktop.ts` 统一封装 Tauri 能力调用，带浏览器 fallback，确保 `npm run dev` 远程开发不受影响。
 
-当前原则：
+设计原则：
 
-- `Tauri` Rust 层先保持“薄壳”
-- 能交给 Web 层的聊天逻辑，不要重复塞进 Rust command
+- Rust 层负责桌面原生能力和连接可靠性，可以承载 HTTP/WS 协议逻辑（连接不绑定页面生命周期）
+- Web 层负责 UI 渲染和视图状态
+- Go 后端负责消息业务规则和持久化
 
 ### Go 后端层
 

@@ -2,7 +2,16 @@ import { create } from "zustand";
 import { createAPIClient, APIClientError } from "../api/client";
 import { httpBaseURL, wsBaseURL } from "../config";
 import { saveToken, clearToken, loadToken, showNotification } from "../desktop";
+import { getInitialLanguage, persistLanguage, t, type Language } from "../i18n";
 import { createRealtimeClient, type RealtimeStatus } from "../realtime/client";
+import {
+  applyResolvedTheme,
+  getInitialThemeMode,
+  persistThemeMode,
+  resolveThemeMode,
+  type ResolvedTheme,
+  type ThemeMode,
+} from "../theme";
 import type {
   ChatMessage,
   CurrentUser,
@@ -30,6 +39,9 @@ import type { ChatMessageView, Conversation, ConversationScope, HistoryView } fr
 
 type ChatState = {
   token: string;
+  language: Language;
+  themeMode: ThemeMode;
+  resolvedTheme: ResolvedTheme;
   loginForm: LoginRequest;
   registerForm: RegisterRequest;
   currentUser: CurrentUser | null;
@@ -80,10 +92,17 @@ type ChatState = {
   removeGroupMember: (groupID: number, username: string) => Promise<void>;
   uploadFile: (file: File, receiverUsername?: string) => Promise<void>;
   bootstrapSession: () => Promise<void>;
+  setLanguage: (language: Language) => void;
+  setThemeMode: (themeMode: ThemeMode) => void;
+  setResolvedTheme: (resolvedTheme: ResolvedTheme) => void;
 };
 
 const api = createAPIClient(httpBaseURL);
 const realtime = createRealtimeClient(wsBaseURL);
+const initialThemeMode = getInitialThemeMode();
+const initialResolvedTheme = resolveThemeMode(initialThemeMode);
+
+applyResolvedTheme(initialResolvedTheme);
 
 const initialMessages = normalizeMessages([
   {
@@ -103,7 +122,11 @@ function isUnauthorizedError(err: unknown) {
   );
 }
 
-function expireSession(message = "Session expired. Log in again.") {
+function localized(key: Parameters<typeof t>[1], params?: Parameters<typeof t>[2]) {
+  return t(useChatStore.getState().language, key, params);
+}
+
+function expireSession(message?: string) {
   realtime.disconnect();
   void clearToken();
   useChatStore.setState({
@@ -111,7 +134,7 @@ function expireSession(message = "Session expired. Log in again.") {
     currentUser: null,
     status: "error",
     authExpired: true,
-    error: message,
+    error: message ?? localized("error.sessionExpired"),
     reconnectAttempt: 0,
     historyLoading: false,
   });
@@ -157,7 +180,7 @@ function scheduleSendTimeout(conversationId: string, localId: string) {
           ...state.messagesByConversation,
           [conversationId]: messages.map((message) =>
             message.localId === localId && message.deliveryStatus === "sending"
-              ? { ...message, deliveryStatus: "failed", error: "No realtime confirmation received." }
+              ? { ...message, deliveryStatus: "failed", error: localized("error.noConfirmation") }
               : message,
           ),
         },
@@ -184,7 +207,7 @@ function connectionHandlers() {
     onReady: (payload: { user: CurrentUser; heartbeatTimeout: string }) => {
       useChatStore.setState({
         currentUser: payload.user,
-        notice: `Realtime session ready. Heartbeat timeout: ${payload.heartbeatTimeout}`,
+        notice: localized("notice.realtimeReady", { timeout: payload.heartbeatTimeout }),
       });
     },
     onPresence: ({ user }: { user: OnlineUser }) => {
@@ -216,7 +239,10 @@ function connectionHandlers() {
     onReconnectScheduled: (attempt: number, delayMs: number) => {
       useChatStore.setState({
         reconnectAttempt: attempt,
-        notice: `Realtime reconnect attempt ${attempt} scheduled in ${Math.round(delayMs / 1000)}s.`,
+        notice: localized("notice.reconnectScheduled", {
+          attempt,
+          seconds: Math.round(delayMs / 1000),
+        }),
       });
     },
   };
@@ -271,6 +297,9 @@ function ingestRealtimeMessage(message: ChatMessage, requestId?: string) {
 
 export const useChatStore = create<ChatState>((set, get) => ({
   token: "",
+  language: getInitialLanguage(),
+  themeMode: initialThemeMode,
+  resolvedTheme: initialResolvedTheme,
   loginForm: { username: "", password: "" },
   registerForm: { username: "", password: "", nickname: "" },
   currentUser: null,
@@ -293,6 +322,20 @@ export const useChatStore = create<ChatState>((set, get) => ({
   newGroupName: "",
   newGroupMembers: "",
   uploadingFile: false,
+  setLanguage: (language) => {
+    persistLanguage(language);
+    set({ language });
+  },
+  setThemeMode: (themeMode) => {
+    persistThemeMode(themeMode);
+    const resolvedTheme = resolveThemeMode(themeMode);
+    applyResolvedTheme(resolvedTheme);
+    set({ themeMode, resolvedTheme });
+  },
+  setResolvedTheme: (resolvedTheme) => {
+    applyResolvedTheme(resolvedTheme);
+    set({ resolvedTheme });
+  },
 
   setLoginForm: (patch) =>
     set((state) => ({ loginForm: { ...state.loginForm, ...patch } })),
@@ -349,7 +392,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         reconnectBaseDelayMs: 900,
       });
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Login failed";
+      const message = err instanceof Error ? err.message : t(get().language, "error.loginFailed");
       set({ error: message, status: "error" });
     }
   },
@@ -359,11 +402,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
       await api.register(get().registerForm);
       const { username, password } = get().registerForm;
       set({
-        notice: "Registration succeeded. You can now log in with the new account.",
+        notice: t(get().language, "notice.registered"),
         loginForm: { username, password },
       });
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Registration failed";
+      const message = err instanceof Error ? err.message : t(get().language, "error.registerFailed");
       set({ error: message });
     }
   },
@@ -372,10 +415,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
   reconnect: () => {
     const { token } = get();
     if (!token) {
-      set({ error: "Log in before reconnecting realtime." });
+      set({ error: t(get().language, "error.loginBeforeReconnect") });
       return;
     }
-    set({ error: "", notice: "Manual realtime reconnect requested.", reconnectAttempt: 0 });
+    set({ error: "", notice: t(get().language, "notice.manualReconnect"), reconnectAttempt: 0 });
     realtime.connect(token, connectionHandlers(), {
       maxReconnectAttempts: 6,
       reconnectBaseDelayMs: 900,
@@ -389,7 +432,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   // ── History ──
   loadPublicHistory: async () => {
     const { token } = get();
-    if (!token) { set({ error: "Log in first before loading history." }); return; }
+    if (!token) { set({ error: t(get().language, "error.loginBeforeHistory") }); return; }
     try {
       set({ error: "", historyLoading: true });
       const history = await api.getPublicHistoryPage(token);
@@ -403,14 +446,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }));
     } catch (err) {
       if (isUnauthorizedError(err)) { expireSession(); return; }
-      set({ error: err instanceof Error ? err.message : "Failed to load public history", historyLoading: false });
+      set({ error: err instanceof Error ? err.message : t(get().language, "error.loadPublicHistory"), historyLoading: false });
     }
   },
   loadPrivateHistory: async (username) => {
     const { token, historyTarget } = get();
-    if (!token) { set({ error: "Log in first before loading private history." }); return; }
+    if (!token) { set({ error: t(get().language, "error.loginBeforePrivateHistory") }); return; }
     const peer = (username ?? historyTarget).trim();
-    if (!peer) { set({ error: "Enter a username before loading private history." }); return; }
+    if (!peer) { set({ error: t(get().language, "error.enterPrivateUsername") }); return; }
     try {
       set({ error: "", historyLoading: true });
       const history = await api.getPrivateHistoryPage(token, peer);
@@ -435,7 +478,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }));
     } catch (err) {
       if (isUnauthorizedError(err)) { expireSession(); return; }
-      set({ error: err instanceof Error ? err.message : "Failed to load private history", historyLoading: false });
+      set({ error: err instanceof Error ? err.message : t(get().language, "error.loadPrivateHistory"), historyLoading: false });
     }
   },
   loadOlderHistory: async () => {
@@ -460,7 +503,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }));
     } catch (err) {
       if (isUnauthorizedError(err)) { expireSession(); return; }
-      set({ error: err instanceof Error ? err.message : "Failed to load older messages", historyLoading: false });
+      set({ error: err instanceof Error ? err.message : t(get().language, "error.loadOlder"), historyLoading: false });
     }
   },
   reloadActiveHistory: async () => {
@@ -484,7 +527,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
   refreshOnlineUsers: async () => {
     const { token } = get();
-    if (!token) { set({ error: "Log in first before refreshing online users." }); return; }
+    if (!token) { set({ error: t(get().language, "error.loginBeforeHistory") }); return; }
     try {
       set({ error: "" });
       const users = await api.getOnlineUsers(token);
@@ -494,11 +537,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
           acc[cid] = { ...(state.conversations[cid] ?? privateConversation(user.username)), online: user.online };
           return acc;
         }, { ...state.conversations });
-        return { onlineUsers: users, conversations, notice: `Presence refreshed. ${users.length} users online.` };
+        return {
+          onlineUsers: users,
+          conversations,
+          notice: t(state.language, "notice.presenceRefreshed", { count: users.length }),
+        };
       });
     } catch (err) {
       if (isUnauthorizedError(err)) { expireSession(); return; }
-      set({ error: err instanceof Error ? err.message : "Failed to refresh online users" });
+      set({ error: err instanceof Error ? err.message : t(get().language, "error.refreshUsers") });
     }
   },
 
@@ -508,16 +555,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const content = state.draft.trim();
     if (!content) return;
     if (!state.token || state.status !== "connected" || !state.currentUser) {
-      set({ error: "Connect the realtime session before sending messages." });
+      set({ error: t(state.language, "error.connectBeforeSend") });
       return;
     }
     const view = activeView(state.activeConversationId);
     if (view.scope === "private" && !view.peer) {
-      set({ error: "Choose a private conversation before sending a direct message." });
+      set({ error: t(state.language, "error.choosePrivate") });
       return;
     }
     if (view.scope === "group" && !view.groupID) {
-      set({ error: "Select a group before sending a message." });
+      set({ error: t(state.language, "error.selectGroup") });
       return;
     }
 
@@ -530,12 +577,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
     else sent = realtime.sendPrivateMessage({ receiverUsername: view.peer, content }, requestId);
 
     set((current) => ({
-      error: sent ? "" : "Realtime socket is not ready.",
+      error: sent ? "" : t(current.language, "error.socketNotReady"),
       draft: sent ? "" : current.draft,
       messagesByConversation: {
         ...current.messagesByConversation,
         [cid]: mergeMessages(current.messagesByConversation[cid] ?? [], [
-          { ...optimistic, deliveryStatus: sent ? "sending" : "failed", error: sent ? undefined : "Socket is not open." },
+          { ...optimistic, deliveryStatus: sent ? "sending" : "failed", error: sent ? undefined : t(current.language, "error.socketNotOpen") },
         ]),
       },
       conversations: {
@@ -562,7 +609,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     if (!message || message.deliveryStatus !== "failed") return;
     const view = activeView(cid);
     if (!state.currentUser || state.status !== "connected") {
-      set({ error: "Reconnect the realtime session before retrying messages." });
+      set({ error: t(state.language, "error.reconnectBeforeRetry") });
       return;
     }
 
@@ -574,12 +621,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
     else sent = realtime.sendPrivateMessage({ receiverUsername: view.peer, content: message.content }, requestId);
 
     set((current) => ({
-      error: sent ? "" : "Realtime socket is not ready.",
+      error: sent ? "" : t(current.language, "error.socketNotReady"),
       messagesByConversation: {
         ...current.messagesByConversation,
         [cid]: mergeMessages(
           (current.messagesByConversation[cid] ?? []).filter((entry) => entry.localId !== localId),
-          [{ ...retry, deliveryStatus: sent ? "sending" : "failed", error: sent ? undefined : "Socket is not open." }],
+          [{ ...retry, deliveryStatus: sent ? "sending" : "failed", error: sent ? undefined : t(current.language, "error.socketNotOpen") }],
         ),
       },
     }));
@@ -589,9 +636,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
   // ── Group ──
   createGroup: async () => {
     const { token, newGroupName, newGroupMembers } = get();
-    if (!token) { set({ error: "Log in before creating a group." }); return; }
+    if (!token) { set({ error: t(get().language, "error.loginBeforeCreateGroup") }); return; }
     const name = newGroupName.trim();
-    if (!name) { set({ error: "Enter a group name." }); return; }
+    if (!name) { set({ error: t(get().language, "error.enterGroupName") }); return; }
     try {
       set({ error: "" });
       const members = newGroupMembers.split(",").map((s) => s.trim()).filter(Boolean);
@@ -605,11 +652,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
         activeConversationId: cid,
         newGroupName: "",
         newGroupMembers: "",
-        notice: `Group "${group.groupName}" created.`,
+        notice: t(state.language, "notice.groupCreated", { name: group.groupName }),
       }));
     } catch (err) {
       if (isUnauthorizedError(err)) { expireSession(); return; }
-      set({ error: err instanceof Error ? err.message : "Failed to create group" });
+      set({ error: err instanceof Error ? err.message : t(get().language, "error.createGroup") });
     }
   },
   loadGroups: async () => {
@@ -633,7 +680,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
   loadGroupHistory: async (groupID) => {
     const { token } = get();
-    if (!token) { set({ error: "Log in before loading group history." }); return; }
+    if (!token) { set({ error: t(get().language, "error.loginBeforeGroupHistory") }); return; }
     try {
       set({ error: "", historyLoading: true });
       const [history, members] = await Promise.all([
@@ -659,14 +706,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
               lastMessage: lastMessage?.content,
               updatedAt: lastMessage?.timestamp,
               unreadCount: 0,
-              description: `${members.length} members`,
+              description: members.length === 1 ? "1 member" : `${members.length} members`,
             },
           },
         };
       });
     } catch (err) {
       if (isUnauthorizedError(err)) { expireSession(); return; }
-      set({ error: err instanceof Error ? err.message : "Failed to load group history", historyLoading: false });
+      set({ error: err instanceof Error ? err.message : t(get().language, "error.loadGroupHistory"), historyLoading: false });
     }
   },
   addGroupMembers: async (groupID, usernames) => {
@@ -675,11 +722,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
     try {
       set({ error: "" });
       await api.addGroupMembers(token, groupID, { usernames });
-      set({ notice: `Added ${usernames.length} member(s) to group.` });
+      set({ notice: t(get().language, "notice.membersAdded", { count: usernames.length }) });
       await get().loadGroupHistory(groupID);
     } catch (err) {
       if (isUnauthorizedError(err)) { expireSession(); return; }
-      set({ error: err instanceof Error ? err.message : "Failed to add members" });
+      set({ error: err instanceof Error ? err.message : t(get().language, "error.addMembers") });
     }
   },
   removeGroupMember: async (groupID, username) => {
@@ -688,25 +735,25 @@ export const useChatStore = create<ChatState>((set, get) => ({
     try {
       set({ error: "" });
       await api.removeGroupMember(token, groupID, username);
-      set({ notice: `Removed ${username} from group.` });
+      set({ notice: t(get().language, "notice.memberRemoved", { name: username }) });
       await get().loadGroupHistory(groupID);
     } catch (err) {
       if (isUnauthorizedError(err)) { expireSession(); return; }
-      set({ error: err instanceof Error ? err.message : "Failed to remove member" });
+      set({ error: err instanceof Error ? err.message : t(get().language, "error.removeMember") });
     }
   },
 
   // ── File ──
   uploadFile: async (file, receiverUsername) => {
     const { token } = get();
-    if (!token) { set({ error: "Log in before uploading files." }); return; }
+    if (!token) { set({ error: t(get().language, "error.loginBeforeUpload") }); return; }
     try {
       set({ error: "", uploadingFile: true, lastSelectedFile: file.name });
       await api.uploadFile(token, file, receiverUsername);
-      set({ uploadingFile: false, lastSelectedFile: "", notice: `File "${file.name}" uploaded.` });
+      set({ uploadingFile: false, lastSelectedFile: "", notice: t(get().language, "notice.fileUploaded", { name: file.name }) });
     } catch (err) {
       if (isUnauthorizedError(err)) { expireSession(); return; }
-      set({ error: err instanceof Error ? err.message : "Failed to upload file", uploadingFile: false });
+      set({ error: err instanceof Error ? err.message : t(get().language, "error.uploadFile"), uploadingFile: false });
     }
   },
 
@@ -727,7 +774,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       currentUser: storedUser,
       authExpired: false,
       error: "",
-      notice: "Restoring saved session…",
+      notice: t(get().language, "notice.restoreSession"),
       reconnectAttempt: 0,
     });
 
@@ -757,7 +804,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         conversations,
         onlineUsers: users,
         groups,
-        notice: "Saved session restored.",
+        notice: t(get().language, "notice.sessionRestored"),
       });
 
       realtime.connect(storedToken, connectionHandlers(), {
@@ -766,11 +813,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
       });
     } catch (err) {
       if (isUnauthorizedError(err)) {
-        expireSession("Stored session expired. Log in again.");
+        expireSession();
         return;
       }
       set({
-        error: err instanceof Error ? err.message : "Failed to restore saved session",
+        error: err instanceof Error ? err.message : t(get().language, "error.restoreSession"),
         notice: "",
       });
     }

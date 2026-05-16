@@ -1,6 +1,8 @@
+import { t } from "../i18n";
 import { useChatStore } from "../store/chatStore";
 
 export function AuthPanel() {
+  const language = useChatStore((state) => state.language);
   const loginForm = useChatStore((state) => state.loginForm);
   const registerForm = useChatStore((state) => state.registerForm);
   const setLoginForm = useChatStore((state) => state.setLoginForm);
@@ -13,12 +15,12 @@ export function AuthPanel() {
       <div className="form-block">
         <header className="panel-header panel-header-tight">
           <div>
-            <p className="section-label">Access</p>
-            <h2>Login</h2>
+            <p className="section-label">{t(language, "auth.access")}</p>
+            <h2>{t(language, "auth.login")}</h2>
           </div>
         </header>
         <label>
-          Username
+          {t(language, "auth.username")}
           <input
             value={loginForm.username}
             onChange={(event) => setLoginForm({ username: event.target.value })}
@@ -26,7 +28,7 @@ export function AuthPanel() {
           />
         </label>
         <label>
-          Password
+          {t(language, "auth.password")}
           <input
             type="password"
             value={loginForm.password}
@@ -35,7 +37,7 @@ export function AuthPanel() {
           />
         </label>
         <button type="button" className="primary-button" onClick={login}>
-          Open channel
+          {t(language, "auth.submit")}
         </button>
       </div>
 
@@ -44,12 +46,12 @@ export function AuthPanel() {
       <div className="form-block">
         <header className="panel-header panel-header-tight">
           <div>
-            <p className="section-label">Provision</p>
-            <h2>Create account</h2>
+            <p className="section-label">{t(language, "auth.provision")}</p>
+            <h2>{t(language, "auth.createAccount")}</h2>
           </div>
         </header>
         <label>
-          New username
+          {t(language, "auth.newUsername")}
           <input
             value={registerForm.username}
             onChange={(event) =>
@@ -59,17 +61,17 @@ export function AuthPanel() {
           />
         </label>
         <label>
-          Nickname
+          {t(language, "auth.nickname")}
           <input
             value={registerForm.nickname}
             onChange={(event) =>
               setRegisterForm({ nickname: event.target.value })
             }
-            placeholder="Friendly name"
+            placeholder={t(language, "auth.nicknamePlaceholder")}
           />
         </label>
         <label>
-          New password
+          {t(language, "auth.newPassword")}
           <input
             type="password"
             value={registerForm.password}
@@ -80,7 +82,7 @@ export function AuthPanel() {
           />
         </label>
         <button type="button" className="secondary-button" onClick={register}>
-          Register node
+          {t(language, "auth.register")}
         </button>
       </div>
     </section>

@@ -3,6 +3,7 @@ import { useShallow } from "zustand/shallow";
 import { Composer } from "./Composer";
 import { GroupPanel } from "./GroupPanel";
 import { MessageList } from "./MessageList";
+import { t } from "../i18n";
 import {
   selectActiveConversation,
   selectActiveMessages,
@@ -11,6 +12,7 @@ import {
 } from "../store/chatStore";
 
 export function ChatPanel() {
+  const language = useChatStore((state) => state.language);
   const token = useChatStore((state) => state.token);
   const status = useChatStore((state) => state.status);
   const activeHistoryCursor = useChatStore(
@@ -54,13 +56,19 @@ export function ChatPanel() {
 
   const historyScopeLabel =
     activeConversation.scope === "public"
-      ? "Lobby"
+      ? t(language, "chat.lobby")
       : activeConversation.scope === "group"
-        ? "Group"
-        : "Direct";
+        ? t(language, "chat.group")
+        : t(language, "chat.direct");
   const isConnected = status === "connected";
   const messageCountLabel =
-    messages.length === 1 ? "1 message" : `${messages.length} messages`;
+    t(language, messages.length === 1 ? "chat.message" : "chat.messages", { count: messages.length });
+  const conversationTitle =
+    activeConversation.scope === "public"
+      ? t(language, "chat.publicTitle")
+      : activeConversation.scope === "private"
+        ? t(language, "chat.directTitle", { name: activeConversation.peerUsername })
+        : activeConversation.title;
 
   return (
     <section className="panel conversation-panel">
@@ -73,20 +81,20 @@ export function ChatPanel() {
 
       <header className="conversation-header">
         <div>
-          <p className="section-label">Conversation // {historyScopeLabel}</p>
-          <h2>{activeConversation.title}</h2>
+          <p className="section-label">{t(language, "chat.conversation")} / {historyScopeLabel}</p>
+          <h2>{conversationTitle}</h2>
           <small>{activeConversation.description}</small>
         </div>
         <div className="header-actions">
           <span className="scope-badge">{messageCountLabel}</span>
           {activeStats.sendingCount > 0 ? (
             <span className="scope-badge scope-badge-warn">
-              {activeStats.sendingCount} sending
+              {t(language, "chat.sending", { count: activeStats.sendingCount })}
             </span>
           ) : null}
           {activeStats.failedCount > 0 ? (
             <span className="scope-badge scope-badge-error">
-              {activeStats.failedCount} failed
+              {t(language, "chat.failed", { count: activeStats.failedCount })}
             </span>
           ) : null}
           {activeConversation.updatedAt ? (
@@ -101,7 +109,7 @@ export function ChatPanel() {
               disabled={historyLoading}
               onClick={() => void loadOlderHistory()}
             >
-              {historyLoading ? "Loading" : "Load older"}
+              {historyLoading ? t(language, "chat.loading") : t(language, "chat.loadOlder")}
             </button>
           ) : null}
           <button
@@ -110,10 +118,10 @@ export function ChatPanel() {
             disabled={!token || historyLoading}
             onClick={() => void reloadActiveHistory()}
           >
-            Reload
+            {t(language, "chat.reload")}
           </button>
           <span className={`scope-badge ${isConnected ? "scope-badge-live" : ""}`}>
-            {isConnected ? "LIVE" : "OFFLINE"}
+            {isConnected ? t(language, "chat.live") : t(language, "chat.offline")}
           </span>
           <button
             type="button"
@@ -121,7 +129,7 @@ export function ChatPanel() {
             disabled={!token || uploadingFile}
             onClick={() => handlePickFile()}
           >
-            {uploadingFile ? "Uploading..." : "Attach file"}
+            {uploadingFile ? t(language, "chat.uploading") : t(language, "chat.attachFile")}
           </button>
         </div>
       </header>
@@ -132,13 +140,13 @@ export function ChatPanel() {
 
       {lastSelectedFile && !uploadingFile ? (
         <div className="callout neutral file-callout">
-          Selected: {lastSelectedFile}
+          {t(language, "chat.selected", { file: lastSelectedFile })}
         </div>
       ) : null}
 
       {uploadingFile ? (
         <div className="callout neutral">
-          Uploading {lastSelectedFile}…
+          {t(language, "chat.uploading")} {lastSelectedFile}
         </div>
       ) : null}
 

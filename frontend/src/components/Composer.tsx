@@ -1,6 +1,8 @@
+import { t } from "../i18n";
 import { useChatStore } from "../store/chatStore";
 
 export function Composer() {
+  const language = useChatStore((state) => state.language);
   const token = useChatStore((state) => state.token);
   const status = useChatStore((state) => state.status);
   const reconnectAttempt = useChatStore((state) => state.reconnectAttempt);
@@ -13,20 +15,20 @@ export function Composer() {
 
   const isConnected = status === "connected";
   const composerHint = !token
-    ? "Authenticate before transmitting."
+    ? t(language, "composer.needAuth")
     : isConnected
-      ? "Press Enter to transmit. Failed messages can be retried."
+      ? t(language, "composer.ready")
       : reconnectAttempt > 0
-        ? `Realtime link is reconnecting. Attempt ${reconnectAttempt}.`
-        : "Realtime link is not connected.";
+        ? t(language, "composer.reconnecting", { attempt: reconnectAttempt })
+        : t(language, "composer.offline");
   const composerPlaceholder =
     activeConversation?.scope === "private"
-      ? `Send a direct message to ${
-          activeConversation.peerUsername || "selected user"
-        }`
+      ? t(language, "composer.privatePlaceholder", {
+          name: activeConversation.peerUsername || t(language, "composer.selectedUser"),
+        })
       : activeConversation?.scope === "group"
-        ? `Send a message to ${activeConversation.title}`
-        : "Send a message to the public lobby";
+        ? t(language, "composer.groupPlaceholder", { name: activeConversation.title })
+        : t(language, "composer.publicPlaceholder");
 
   return (
     <div className="composer">
@@ -51,7 +53,7 @@ export function Composer() {
         disabled={!draft.trim() || !token || status !== "connected"}
         onClick={sendMessage}
       >
-        Transmit
+        {t(language, "composer.send")}
       </button>
     </div>
   );

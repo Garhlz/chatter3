@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useShallow } from "zustand/shallow";
 import { httpBaseURL } from "../config";
+import { t } from "../i18n";
 import { formatMessageTime } from "./format";
 import {
   selectActiveMessages,
@@ -14,6 +15,7 @@ function formatFileSize(bytes: number): string {
 }
 
 export function MessageList() {
+  const language = useChatStore((state) => state.language);
   const currentUser = useChatStore((state) => state.currentUser);
   const activeConversationId = useChatStore((state) => state.activeConversationId);
   const activeScrollTop = useChatStore(
@@ -84,7 +86,7 @@ export function MessageList() {
                     download={message.file!.fileName}
                     style={{ display: "inline-flex", textDecoration: "none" }}
                   >
-                    Download
+                    {t(language, "message.download")}
                   </a>
                   {message.content ? (
                     <p style={{ marginTop: 6 }}>{message.content}</p>
@@ -96,14 +98,18 @@ export function MessageList() {
 
               {message.deliveryStatus !== "sent" ? (
                 <div className="message-status">
-                  <span>{message.deliveryStatus}</span>
+                  <span>
+                    {message.deliveryStatus === "sending"
+                      ? t(language, "message.status.sending")
+                      : t(language, "message.status.failed")}
+                  </span>
                   {message.error ? <small>{message.error}</small> : null}
                   {message.deliveryStatus === "failed" ? (
                     <button
                       type="button"
                       onClick={() => retryMessage(message.localId)}
                     >
-                      Retry
+                      {t(language, "message.retry")}
                     </button>
                   ) : null}
                 </div>
@@ -113,12 +119,9 @@ export function MessageList() {
         })
       ) : (
         <div className="transmission-empty">
-          <span>NO TRAFFIC</span>
-          <strong>This channel has no loaded messages.</strong>
-          <p>
-            Reload history, open a direct channel, or transmit the first message
-            once the realtime link is live.
-          </p>
+          <span>{t(language, "chat.emptyKicker")}</span>
+          <strong>{t(language, "chat.emptyTitle")}</strong>
+          <p>{t(language, "chat.emptyBody")}</p>
         </div>
       )}
     </div>
