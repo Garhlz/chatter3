@@ -113,7 +113,7 @@ npm run dev
 - 原生 OS 通知（仅非当前会话且窗口未聚焦/不可见时触发，浏览器内 Notification API fallback）
 - 语言、主题本地持久化恢复（Tauri store，浏览器环境 fallback 到 localStorage）
 - JWT token 安全持久化恢复（Tauri 环境走系统凭据库，浏览器开发 fallback 到 localStorage）
-- 本地聊天记录快照恢复（按用户缓存会话列表、最近消息、分页 cursor 与滚动位置）
+- SQLite 本地消息持久化（每消息逐行写入，启动时即时加载，浏览器 fallback 到 localStorage JSON blob）
 
 群文件上传、删群、已读、撤回和多端同步暂未实现。
 

@@ -199,7 +199,122 @@ export async function clearToken(): Promise<void> {
   localStorage.removeItem(TOKEN_KEY);
 }
 
-// ── 本地聊天记录快照 ──
+// ── SQLite 消息持久化 ──
+
+export type MessageRow = {
+  localId: string;
+  conversationId: string;
+  messageId?: number | null;
+  scope: string;
+  senderId?: number | null;
+  senderUsername: string;
+  senderNickname: string;
+  receiverUsername?: string | null;
+  groupId?: number | null;
+  contentType: string;
+  content: string;
+  fileJson?: string | null;
+  timestamp: string;
+  deliveryStatus: string;
+  clientRequestId?: string | null;
+  error?: string | null;
+};
+
+export type ConversationRow = {
+  id: string;
+  scope: string;
+  title: string;
+  peerUsername: string;
+  groupId?: number | null;
+  description: string;
+  lastMessage?: string | null;
+  updatedAt?: string | null;
+  unreadCount: number;
+};
+
+async function invokeDb<T>(
+  command: string,
+  args?: Record<string, unknown>,
+): Promise<T> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<T>(command, args);
+}
+
+export async function dbInsertMessage(msg: MessageRow): Promise<void> {
+  if (!runningInTauri()) return;
+  await invokeDb("db_insert_message", {
+    msg: { ...msg, local_id: msg.localId, conversation_id: msg.conversationId, message_id: msg.messageId, sender_id: msg.senderId, sender_username: msg.senderUsername, sender_nickname: msg.senderNickname, receiver_username: msg.receiverUsername, group_id: msg.groupId, content_type: msg.contentType, file_json: msg.fileJson, delivery_status: msg.deliveryStatus, client_request_id: msg.clientRequestId },
+  });
+}
+
+export async function dbGetMessages(
+  conversationId: string,
+  before?: string,
+  limit = 50,
+): Promise<MessageRow[]> {
+  if (!runningInTauri()) return [];
+  const rows = await invokeDb<Array<Record<string, unknown>>>("db_get_messages", {
+    conversationId,
+    before: before ?? null,
+    limit,
+  });
+  return rows.map(r => ({
+    localId: r.local_id as string,
+    conversationId: r.conversation_id as string,
+    messageId: r.message_id as number | null,
+    scope: r.scope as string,
+    senderId: r.sender_id as number | null,
+    senderUsername: r.sender_username as string,
+    senderNickname: r.sender_nickname as string,
+    receiverUsername: r.receiver_username as string | null,
+    groupId: r.group_id as number | null,
+    contentType: r.content_type as string,
+    content: r.content as string,
+    fileJson: r.file_json as string | null,
+    timestamp: r.timestamp as string,
+    deliveryStatus: r.delivery_status as string,
+    clientRequestId: r.client_request_id as string | null,
+    error: r.error as string | null,
+  }));
+}
+
+export async function dbConfirmMessage(
+  clientRequestId: string,
+  serverMsg: MessageRow,
+): Promise<void> {
+  if (!runningInTauri()) return;
+  await invokeDb("db_confirm_message", {
+    clientRequestId,
+    serverMsg: { ...serverMsg, local_id: serverMsg.localId, conversation_id: serverMsg.conversationId, message_id: serverMsg.messageId, sender_id: serverMsg.senderId, sender_username: serverMsg.senderUsername, sender_nickname: serverMsg.senderNickname, receiver_username: serverMsg.receiverUsername, group_id: serverMsg.groupId, content_type: serverMsg.contentType, file_json: serverMsg.fileJson, delivery_status: serverMsg.deliveryStatus, client_request_id: serverMsg.clientRequestId },
+  });
+}
+
+export async function dbUpsertConversation(
+  conv: ConversationRow,
+): Promise<void> {
+  if (!runningInTauri()) return;
+  await invokeDb("db_upsert_conversation", {
+    conv: { id: conv.id, scope: conv.scope, title: conv.title, peer_username: conv.peerUsername, group_id: conv.groupId, description: conv.description, last_message: conv.lastMessage, updated_at: conv.updatedAt, unread_count: conv.unreadCount },
+  });
+}
+
+export async function dbGetConversations(): Promise<ConversationRow[]> {
+  if (!runningInTauri()) return [];
+  const rows = await invokeDb<Array<Record<string, unknown>>>("db_get_conversations");
+  return rows.map(r => ({
+    id: r.id as string,
+    scope: r.scope as string,
+    title: r.title as string,
+    peerUsername: r.peer_username as string,
+    groupId: r.group_id as number | null,
+    description: r.description as string,
+    lastMessage: r.last_message as string | null,
+    updatedAt: r.updated_at as string | null,
+    unreadCount: r.unread_count as number,
+  }));
+}
+
+// ── 本地聊天记录快照 (legacy, 浏览器 dev fallback) ──
 
 export async function saveChatArchiveSnapshot(
   username: string,
