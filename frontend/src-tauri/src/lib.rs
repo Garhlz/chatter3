@@ -1,4 +1,6 @@
+mod api;
 mod db;
+mod realtime;
 
 use tauri::{
     Emitter,
@@ -53,6 +55,13 @@ fn clear_desktop_token() -> Result<(), String> {
 }
 
 pub fn run() {
+    // HTTP API base URL: default to localhost:8080 for Tauri production,
+    // overridable via CHATTER_API_URL env var.
+    let api_base_url = std::env::var("CHATTER_API_URL")
+        .unwrap_or_else(|_| "http://127.0.0.1:8080".to_string());
+    let http_client = api::new_http_client(api_base_url);
+    let realtime_handle = realtime::RealtimeHandle::new();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             show_main_window(app);
@@ -63,6 +72,8 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_window_state::Builder::default().build())
+        .manage(std::sync::Mutex::new(http_client))
+        .manage(realtime_handle)
         .invoke_handler(tauri::generate_handler![
             save_desktop_token,
             load_desktop_token,
@@ -74,9 +85,25 @@ pub fn run() {
             db::db_upsert_conversation,
             db::db_get_conversations,
             db::db_update_unread_count,
+            api::api_login,
+            api::api_register,
+            api::api_get_online_users,
+            api::api_get_public_history,
+            api::api_get_private_history,
+            api::api_create_group,
+            api::api_list_groups,
+            api::api_get_group,
+            api::api_get_group_members,
+            api::api_add_group_members,
+            api::api_remove_group_member,
+            api::api_get_group_history,
+            api::api_upload_file,
+            realtime::realtime_connect,
+            realtime::realtime_disconnect,
+            realtime::realtime_send,
         ])
         .setup(|app| {
-            // SQLite 本地聊天存储
+            // SQLite
             let app_data_dir = app
                 .path()
                 .app_data_dir()
@@ -85,7 +112,7 @@ pub fn run() {
                 .expect("failed to initialize local chat database");
             app.manage(db_conn);
 
-            // 系统托盘
+            // System tray
             let show_item = MenuItem::with_id(app, "show", "Show", true, None::<&str>)?;
             let reconnect_item =
                 MenuItem::with_id(app, "reconnect", "Reconnect", true, None::<&str>)?;
@@ -120,7 +147,7 @@ pub fn run() {
                 })
                 .build(app)?;
 
-            // 关闭窗口 → 隐藏到托盘
+            // Close → hide to tray
             if let Some(window) = app.get_webview_window("main") {
                 let window_clone = window.clone();
                 window.on_window_event(move |event| {

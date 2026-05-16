@@ -25,3 +25,8 @@ tauri-plugin-single-instance = "2"
 tauri-plugin-store = "2.4.3"
 tauri-plugin-window-state = "2.4.1"
 rusqlite = { version = "0.39.0", features = ["bundled"] }
+reqwest = { version = "0.13.3", features = ["json", "multipart"] }
+tokio = { version = "1.52.3", features = ["sync", "rt", "rt-multi-thread", "macros"] }
+tokio-tungstenite = "0.29.0"
+futures-util = "0.3.32"
+percent-encoding = "2.3.1"

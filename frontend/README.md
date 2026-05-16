@@ -215,7 +215,6 @@ npm run dev
 - 群文件上传（后端上传 API 缺 groupID 参数）
 - 删群（后端未实现 DELETE /api/v2/groups/{groupID}）
 - 已读 / 撤回 / 多端同步（协议未定义）
-- WS 协议逻辑未迁入 Rust（当前仍在 JS 侧管理连接和重连）
 
 当前协议边界：
 

@@ -1,6 +1,20 @@
 // 桌面能力抽象层：Tauri 环境下走原生 API，浏览器开发时 fallback 到 Web API。
 // 这样 npm run dev 远程开发不受影响，打包成 Tauri 应用时自动用原生能力。
 
+import { createAPIClient as createJsApiClient } from "./api/client";
+import type {
+  LoginResponse,
+  CurrentUser,
+  OnlineUser,
+  ChatMessage,
+  Group,
+  GroupMember,
+  CreateGroupRequest,
+  CreateGroupResponse,
+  AddGroupMemberRequest,
+  UploadResponse,
+} from "./protocol";
+
 let isTauri: boolean | null = null;
 
 export function runningInTauri(): boolean {
@@ -391,4 +405,199 @@ export async function showNotification(
       new Notification(title, { body });
     }
   }
+}
+
+// ── Unified API (Tauri invoke / browser fetch fallback) ──
+
+async function tauriInvoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<T>(cmd, args);
+}
+
+export function createUnifiedAPI(baseURL: string) {
+  const jsApi = createJsApiClient(baseURL);
+
+  return {
+    login: (payload: Parameters<typeof jsApi.login>[0]) =>
+      runningInTauri()
+        ? tauriInvoke<LoginResponse>("api_login", { payload })
+        : jsApi.login(payload),
+    register: (payload: Parameters<typeof jsApi.register>[0]) =>
+      runningInTauri()
+        ? tauriInvoke<{ user: CurrentUser }>("api_register", { payload })
+        : jsApi.register(payload),
+    getOnlineUsers: (token: string) =>
+      runningInTauri()
+        ? tauriInvoke<OnlineUser[]>("api_get_online_users", { token })
+        : jsApi.getOnlineUsers(token),
+    getPublicHistory: (token: string) =>
+      jsApi.getPublicHistory(token),
+    getPrivateHistory: (token: string, username: string) =>
+      jsApi.getPrivateHistory(token, username),
+    getPublicHistoryPage: async (token: string, cursor?: string) => {
+      if (runningInTauri()) {
+        const r = await tauriInvoke<{ data: ChatMessage[]; nextCursor?: string | null }>("api_get_public_history", { token, cursor: cursor ?? null });
+        return { data: r.data, nextCursor: r.nextCursor ?? undefined };
+      }
+      return jsApi.getPublicHistoryPage(token, cursor);
+    },
+    getPrivateHistoryPage: async (token: string, username: string, cursor?: string) => {
+      if (runningInTauri()) {
+        const r = await tauriInvoke<{ data: ChatMessage[]; nextCursor?: string | null }>("api_get_private_history", { token, username, cursor: cursor ?? null });
+        return { data: r.data, nextCursor: r.nextCursor ?? undefined };
+      }
+      return jsApi.getPrivateHistoryPage(token, username, cursor);
+    },
+    createGroup: (token: string, payload: CreateGroupRequest) =>
+      runningInTauri()
+        ? tauriInvoke<CreateGroupResponse>("api_create_group", { token, payload })
+        : jsApi.createGroup(token, payload),
+    listGroups: (token: string) =>
+      runningInTauri()
+        ? tauriInvoke<Group[]>("api_list_groups", { token })
+        : jsApi.listGroups(token),
+    getGroup: (token: string, groupID: number) =>
+      runningInTauri()
+        ? tauriInvoke<Group>("api_get_group", { token, groupId: groupID })
+        : jsApi.getGroup(token, groupID),
+    getGroupMembers: (token: string, groupID: number) =>
+      runningInTauri()
+        ? tauriInvoke<GroupMember[]>("api_get_group_members", { token, groupId: groupID })
+        : jsApi.getGroupMembers(token, groupID),
+    addGroupMembers: (token: string, groupID: number, payload: AddGroupMemberRequest) =>
+      runningInTauri()
+        ? tauriInvoke<void>("api_add_group_members", { token, groupId: groupID, payload })
+        : jsApi.addGroupMembers(token, groupID, payload),
+    removeGroupMember: (token: string, groupID: number, username: string) =>
+      runningInTauri()
+        ? tauriInvoke<void>("api_remove_group_member", { token, groupId: groupID, username })
+        : jsApi.removeGroupMember(token, groupID, username),
+    getGroupHistoryPage: async (token: string, groupID: number, cursor?: string) => {
+      if (runningInTauri()) {
+        const r = await tauriInvoke<{ data: ChatMessage[]; nextCursor?: string | null }>("api_get_group_history", { token, groupId: groupID, cursor: cursor ?? null });
+        return { data: r.data, nextCursor: r.nextCursor ?? undefined };
+      }
+      return jsApi.getGroupHistoryPage(token, groupID, cursor);
+    },
+    uploadFileFromPath: (token: string, filePath: string, receiverUsername?: string) =>
+      tauriInvoke<UploadResponse>("api_upload_file", { token, filePath, receiverUsername: receiverUsername ?? null }),
+    uploadFile: (token: string, file: File, receiverUsername?: string) =>
+      jsApi.uploadFile(token, file, receiverUsername),
+    getDownloadURL: (fileID: number) =>
+      `${baseURL}/api/v2/files/${fileID}`,
+  };
+}
+
+// ── Unified Realtime (Tauri WS / browser WebSocket fallback) ──
+
+import { createRealtimeClient as createJsRealtimeClient } from "./realtime/client";
+
+export function createUnifiedRealtime(wsBaseURL: string) {
+  const jsRealtime = createJsRealtimeClient(wsBaseURL);
+
+  if (!runningInTauri()) {
+    return jsRealtime;
+  }
+
+  let unlistenEvent: Unlisten | null = null;
+  let unlistenStatus: Unlisten | null = null;
+  let unlistenReconnect: Unlisten | null = null;
+
+  async function setupTauriListeners(
+    handlers: Parameters<typeof jsRealtime.connect>[1],
+  ) {
+    unlistenEvent?.();
+    unlistenStatus?.();
+    unlistenReconnect?.();
+
+    const { listen } = await import("@tauri-apps/api/event");
+
+    unlistenEvent = await listen<string>("realtime://event", (event) => {
+      try {
+        const data = JSON.parse(event.payload);
+        switch (data.event) {
+          case "session.ready":
+            handlers.onReady(data.payload);
+            break;
+          case "presence.online":
+          case "presence.offline":
+            handlers.onPresence(data.payload);
+            break;
+          case "chat.public.message":
+            handlers.onPublicMessage(data.payload, data.requestId);
+            break;
+          case "chat.private.message":
+            handlers.onPrivateMessage(data.payload, data.requestId);
+            break;
+          case "chat.group.message":
+            handlers.onGroupMessage(data.payload, data.requestId);
+            break;
+          case "error":
+            handlers.onError(data.payload.message, data.payload.code);
+            break;
+        }
+      } catch {
+        handlers.onError("Failed to parse realtime event");
+      }
+    });
+
+    unlistenStatus = await listen<string>("realtime://status", (event) => {
+      try {
+        const { status } = JSON.parse(event.payload);
+        handlers.onStatusChange(status);
+      } catch { /* ignore */ }
+    });
+
+    unlistenReconnect = await listen<string>("realtime://reconnect", (event) => {
+      try {
+        const { attempt, delayMs } = JSON.parse(event.payload);
+        handlers.onReconnectScheduled?.(attempt, delayMs);
+      } catch { /* ignore */ }
+    });
+  }
+
+  return {
+    connect(
+      token: string,
+      handlers: Parameters<typeof jsRealtime.connect>[1],
+      options?: { maxReconnectAttempts?: number; reconnectBaseDelayMs?: number },
+    ) {
+      void setupTauriListeners(handlers);
+      handlers.onStatusChange("connecting");
+      void tauriInvoke("realtime_connect", { wsBaseUrl: wsBaseURL, token });
+    },
+    disconnect() {
+      unlistenEvent?.();
+      unlistenStatus?.();
+      unlistenReconnect?.();
+      void tauriInvoke("realtime_disconnect");
+    },
+    async sendPublicMessage(payload: { content: string }, requestId?: string) {
+      return tauriInvoke<boolean>("realtime_send", {
+        event: "chat.public.send",
+        payload,
+        requestId: requestId ?? null,
+      });
+    },
+    async sendPrivateMessage(
+      payload: { receiverUsername: string; content: string },
+      requestId?: string,
+    ) {
+      return tauriInvoke<boolean>("realtime_send", {
+        event: "chat.private.send",
+        payload,
+        requestId: requestId ?? null,
+      });
+    },
+    async sendGroupMessage(
+      payload: { groupID: number; content: string },
+      requestId?: string,
+    ) {
+      return tauriInvoke<boolean>("realtime_send", {
+        event: "chat.group.send",
+        payload,
+        requestId: requestId ?? null,
+      });
+    },
+  };
 }
