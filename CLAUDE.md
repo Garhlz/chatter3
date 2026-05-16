@@ -83,7 +83,7 @@ realtime/client.ts  -> WebSocket client
 hooks/              -> shared UI hooks
 ```
 
-The Tauri Rust layer currently handles desktop capabilities: tray, single-instance activation, notifications, window state, dialog/opener/process/store plugins, and local message persistence via SQLite (rusqlite bundled). It does not currently own the HTTP/WebSocket chat protocol.
+The Tauri Rust layer currently handles desktop capabilities: tray, single-instance activation, notifications, window state, dialog/opener/process/store plugins, and local message persistence via SQLite (rusqlite bundled). It also hosts HTTP and WebSocket protocol clients (api.rs, realtime.rs) using reqwest + tokio-tungstenite, exposing 13 HTTP commands and 3 WS commands to the frontend via Tauri invoke. The JS layer accesses these through a unified API (desktop.ts) that delegates to Tauri invoke in desktop mode and falls back to the original JS clients (api/client.ts, realtime/client.ts) for browser dev mode.
 
 Token storage is OS credential-store backed in Tauri through the Rust `keyring` crate. This maps to Windows Credential Manager, macOS Keychain, and Linux Secret Service / libsecret. Browser dev still uses `localStorage`.
 

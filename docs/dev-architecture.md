@@ -79,9 +79,12 @@
 - 原生通知：新消息 OS 级推送，浏览器 Notification API fallback；当前仅非当前会话且窗口未聚焦/不可见时触发
 - 偏好与 Token 存储：Tauri 环境下用 `tauri-plugin-store` 持久化语言和主题；JWT 通过 Rust `keyring` 接系统凭据库，覆盖 Windows Credential Manager、macOS Keychain、Linux Secret Service / libsecret；启动时迁移旧 Tauri store 或旧 `localStorage` 中的 JWT，并删除旧位置 token
 - SQLite 本地消息持久化：通过 `rusqlite` bundle 在 `app_data_dir/chatter3.db` 存消息和会话表，带索引；7 个 Tauri commands 暴露 CRUD 操作；启动时从 SQLite 加载最近消息即时展示，再 HTTP 刷新合并；每条实时消息和 optimistic send 实时逐行写入；浏览器 dev 模式 fallback 到 localStorage JSON blob
+- Rust HTTP 客户端 (`api.rs`)：13 个 Tauri commands 覆盖全部协议端点（login/register、online users、public/private/group history、group CRUD、file upload），基于 `reqwest` + rustls；与后端 protocol-v2 类型对齐
+- Rust WebSocket 客户端 (`realtime.rs`)：3 个 Tauri commands (connect/disconnect/send)，基于 `tokio-tungstenite`；自动重连（指数退避，最多 6 次）、30s 心跳 ping、事件通过 `realtime://event` / `realtime://status` / `realtime://reconnect` emit 到前端
 - 文件对话框（plugin-dialog）+ URL/文件打开（plugin-opener）
+- HTTP base URL 通过 `CHATTER_API_URL` 环境变量配置，默认 `http://127.0.0.1:8080`；WS URL 由 JS 侧传入 `realtime_connect` command
 
-已注册插件：`tauri-plugin-dialog`, `tauri-plugin-opener`, `tauri-plugin-process`, `tauri-plugin-notification`, `tauri-plugin-store`, `tauri-plugin-window-state`, `tauri-plugin-single-instance`；Rust 侧额外使用 `keyring` crate 访问系统凭据库，`rusqlite` (bundled) 管理本地聊天数据库 (`src-tauri/src/db.rs`)
+已注册插件：`tauri-plugin-dialog`, `tauri-plugin-opener`, `tauri-plugin-process`, `tauri-plugin-notification`, `tauri-plugin-store`, `tauri-plugin-window-state`, `tauri-plugin-single-instance`；Rust 侧额外使用 `keyring` crate 访问系统凭据库，`rusqlite` (bundled) 管理本地聊天数据库 (`src-tauri/src/db.rs`)；`reqwest` + `tokio-tungstenite` + `tokio` 承载 HTTP/WS 协议通信 (`src-tauri/src/api.rs`, `src-tauri/src/realtime.rs`)
 
 前端 JS 侧通过 `frontend/src/desktop.ts` 统一封装 Tauri 能力调用，包括偏好/token 存储、本地聊天记录快照、通知、托盘重连事件和窗口状态事件，带浏览器 fallback，确保 `npm run dev` 远程开发不受影响。
 

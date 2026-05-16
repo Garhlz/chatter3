@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { createAPIClient, APIClientError } from "../api/client";
+import { APIClientError } from "../api/client";
 import { httpBaseURL, wsBaseURL } from "../config";
 import {
   saveToken,
@@ -14,6 +14,8 @@ import {
   dbGetMessages,
   dbGetConversations,
   dbUpsertConversation,
+  createUnifiedAPI,
+  createUnifiedRealtime,
   type DesktopWindowState,
   type MessageRow,
 } from "../desktop";
@@ -24,7 +26,7 @@ import {
   t,
   type Language,
 } from "../i18n";
-import { createRealtimeClient, type RealtimeStatus } from "../realtime/client";
+import { type RealtimeStatus } from "../realtime/client";
 import {
   applyResolvedTheme,
   getInitialThemeMode,
@@ -105,8 +107,8 @@ type ChatState = {
   reloadActiveHistory: () => Promise<void>;
   refreshOnlineUsers: () => Promise<void>;
   reconnect: () => void;
-  sendMessage: () => void;
-  retryMessage: (localId: string) => void;
+  sendMessage: () => Promise<void>;
+  retryMessage: (localId: string) => Promise<void>;
   disconnect: () => void;
   clearError: () => void;
   createGroup: () => Promise<void>;
@@ -123,8 +125,8 @@ type ChatState = {
   hydrateDesktopPreferences: () => Promise<void>;
 };
 
-const api = createAPIClient(httpBaseURL);
-const realtime = createRealtimeClient(wsBaseURL);
+const api = createUnifiedAPI(httpBaseURL);
+const realtime = createUnifiedRealtime(wsBaseURL);
 
 // 防火墙：异步副作用不需要阻塞时用来包裹，阻止 unhandled rejection
 function fireAndForget(p: Promise<unknown>) {
@@ -938,7 +940,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   // ── Messaging ──
-  sendMessage: () => {
+  sendMessage: async () => {
     const state = get();
     const content = state.draft.trim();
     if (!content) return;
@@ -960,9 +962,22 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const optimistic = createOptimisticMessage(content, state.currentUser, view, requestId);
     const cid = conversationIdFor(view.scope, view.peer);
     let sent: boolean;
-    if (view.scope === "public") sent = realtime.sendPublicMessage({ content }, requestId);
-    else if (view.scope === "group") sent = realtime.sendGroupMessage({ groupID: view.groupID!, content }, requestId);
-    else sent = realtime.sendPrivateMessage({ receiverUsername: view.peer, content }, requestId);
+    if (view.scope === "public") {
+      sent = await Promise.resolve(
+        realtime.sendPublicMessage({ content }, requestId),
+      );
+    } else if (view.scope === "group") {
+      sent = await Promise.resolve(
+        realtime.sendGroupMessage({ groupID: view.groupID!, content }, requestId),
+      );
+    } else {
+      sent = await Promise.resolve(
+        realtime.sendPrivateMessage(
+          { receiverUsername: view.peer, content },
+          requestId,
+        ),
+      );
+    }
 
     // 在 set 回调内原子性地检查 draft，防止并发 sendMessage 读到同一值产生重复消息
     set((current) => {
@@ -1000,7 +1015,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       );
     }
   },
-  retryMessage: (localId) => {
+  retryMessage: async (localId) => {
     const state = get();
     const cid = state.activeConversationId;
     const messages = state.messagesByConversation[cid] ?? [];
@@ -1015,9 +1030,25 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const requestId = `req-${crypto.randomUUID()}`;
     const retry = createOptimisticMessage(message.content, state.currentUser, view, requestId);
     let sent: boolean;
-    if (view.scope === "public") sent = realtime.sendPublicMessage({ content: message.content }, requestId);
-    else if (view.scope === "group") sent = realtime.sendGroupMessage({ groupID: view.groupID!, content: message.content }, requestId);
-    else sent = realtime.sendPrivateMessage({ receiverUsername: view.peer, content: message.content }, requestId);
+    if (view.scope === "public") {
+      sent = await Promise.resolve(
+        realtime.sendPublicMessage({ content: message.content }, requestId),
+      );
+    } else if (view.scope === "group") {
+      sent = await Promise.resolve(
+        realtime.sendGroupMessage(
+          { groupID: view.groupID!, content: message.content },
+          requestId,
+        ),
+      );
+    } else {
+      sent = await Promise.resolve(
+        realtime.sendPrivateMessage(
+          { receiverUsername: view.peer, content: message.content },
+          requestId,
+        ),
+      );
+    }
 
     set((current) => ({
       error: sent ? "" : t(current.language, "error.socketNotReady"),
