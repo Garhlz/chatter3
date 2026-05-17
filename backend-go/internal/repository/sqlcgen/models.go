@@ -53,4 +53,7 @@ type User struct {
 	Status      int16              `db:"status" json:"status"`
 	CreatedAt   pgtype.Timestamptz `db:"created_at" json:"created_at"`
 	LastLoginAt pgtype.Timestamptz `db:"last_login_at" json:"last_login_at"`
+	Bio         string             `db:"bio" json:"bio"`
+	Email       *string            `db:"email" json:"email"`
+	Gender      int16              `db:"gender" json:"gender"`
 }

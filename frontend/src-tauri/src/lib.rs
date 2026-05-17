@@ -96,6 +96,8 @@ pub fn run() {
             api::api_get_group_members,
             api::api_add_group_members,
             api::api_remove_group_member,
+            api::api_get_user_profile,
+            api::api_update_user_profile,
             api::api_get_group_history,
             api::api_upload_file,
             realtime::realtime_connect,

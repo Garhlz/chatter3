@@ -15,7 +15,7 @@ import type {
   UploadResponse,
 } from "../protocol";
 
-type HTTPMethod = "GET" | "POST" | "DELETE";
+type HTTPMethod = "GET" | "POST" | "PUT" | "DELETE";
 
 export class APIClientError extends Error {
   code: string;
@@ -224,6 +224,41 @@ export function createAPIClient(baseURL: string) {
 
       return (data as APIResponse<UploadResponse>).data;
     },
+    getProfile: (token: string, username: string) =>
+      request<{
+        user: CurrentUser;
+        bio: string;
+        gender: number;
+        createdAt: string;
+        email?: string;
+      }>(
+        `/api/v2/users/${encodeURIComponent(username)}/profile`,
+        "GET",
+        undefined,
+        token,
+      ),
+    updateProfile: (
+      token: string,
+      username: string,
+      payload: {
+        nickname?: string;
+        bio?: string;
+        email?: string;
+        gender?: number;
+      },
+    ) =>
+      request<{
+        user: CurrentUser;
+        bio: string;
+        gender: number;
+        createdAt: string;
+        email?: string;
+      }>(
+        `/api/v2/users/${encodeURIComponent(username)}/profile`,
+        "PUT",
+        payload,
+        token,
+      ),
     getDownloadURL,
   };
 

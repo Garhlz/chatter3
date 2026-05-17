@@ -76,7 +76,7 @@ func NewServer(
 
 	queries := sqlcgen.New(pool)
 
-	userSvc := appsvc.NewUserService(queries, jwtSvc)
+	userSvc := appsvc.NewUserService(queries, jwtSvc, sessions)
 	msgSvc := appsvc.NewMessageService(queries, sessions)
 	fileSvc := appsvc.NewFileService(pool, queries, sessions, cfg.UploadDir, cfg.MaxFileSize)
 	groupSvc := appsvc.NewGroupService(queries, sessions)
@@ -102,6 +102,8 @@ func NewServer(
 
 	// v2 protected endpoints — all require a valid Bearer token.
 	mux.HandleFunc("GET /api/v2/users/online", s.auth(s.handleV2OnlineUsers))
+	mux.HandleFunc("GET /api/v2/users/{username}/profile", s.auth(s.handleV2GetProfile))
+	mux.HandleFunc("PUT /api/v2/users/{username}/profile", s.auth(s.handleV2UpdateProfile))
 	mux.HandleFunc("GET /api/v2/chats/public/history", s.auth(s.handleV2PublicHistory))
 	mux.HandleFunc("GET /api/v2/chats/private/{username}/history", s.auth(s.handleV2PrivateHistory))
 
@@ -288,6 +290,50 @@ func (s *Server) handleV2OnlineUsers(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, protocolv2.APIResponse[[]protocolv2.User]{Data: users})
 }
 
+// handleV2GetProfile returns a user's public profile.
+func (s *Server) handleV2GetProfile(w http.ResponseWriter, r *http.Request) {
+	username := r.PathValue("username")
+	claims := claimsFrom(r)
+	if claims == nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "token required")
+		return
+	}
+	profile, err := s.userSvc.GetUserProfile(r.Context(), username, claims.UserID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "not_found", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, protocolv2.APIResponse[*protocolv2.OwnProfile]{Data: profile})
+}
+
+// handleV2UpdateProfile updates the calling user's own profile.
+func (s *Server) handleV2UpdateProfile(w http.ResponseWriter, r *http.Request) {
+	username := r.PathValue("username")
+	claims := claimsFrom(r)
+	if claims == nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "token required")
+		return
+	}
+	if claims.Username != username {
+		writeError(w, http.StatusForbidden, "forbidden", "can only update your own profile")
+		return
+	}
+	var req protocolv2.UpdateProfileRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	profile, err := s.userSvc.UpdateUserProfile(r.Context(), claims.UserID, &req)
+	if err != nil {
+		if errors.Is(err, appsvc.ErrInvalidProfileInput) {
+			writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, protocolv2.APIResponse[*protocolv2.OwnProfile]{Data: profile})
+}
+
 // handleV2PublicHistory returns a cursor-paginated page of lobby messages.
 // Query params: limit (int, default 50), cursor (string, opaque).
 func (s *Server) handleV2PublicHistory(w http.ResponseWriter, r *http.Request) {
@@ -358,6 +404,11 @@ func (s *Server) handleV2WebSocket(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "token is invalid or expired")
 		return
 	}
+	identity, err := s.userSvc.GetIdentity(r.Context(), claims.UserID)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "token is invalid or expired")
+		return
+	}
 
 	ws, err := acceptWebSocket(w, r)
 	if err != nil {
@@ -368,9 +419,9 @@ func (s *Server) handleV2WebSocket(w http.ResponseWriter, r *http.Request) {
 	defer ws.close()
 
 	sess := &session.Session{
-		UserID:        claims.UserID,
-		Username:      claims.Username,
-		Nickname:      claims.Nickname,
+		UserID:        identity.UserID,
+		Username:      identity.Username,
+		Nickname:      identity.Nickname,
 		LastHeartbeat: time.Now(),
 		Close:         ws.close,
 		Send:          make(chan []byte, 32),
@@ -521,6 +572,11 @@ func (s *Server) handleV2WebSocket(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleV2Upload(w http.ResponseWriter, r *http.Request) {
 	claims := claimsFrom(r)
+	identity, err := s.userSvc.GetIdentity(r.Context(), claims.UserID)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "token is invalid or expired")
+		return
+	}
 
 	r.Body = http.MaxBytesReader(w, r.Body, s.cfg.MaxFileSize+(1<<20))
 	if err := r.ParseMultipartForm(s.cfg.MaxFileSize + (1 << 20)); err != nil {
@@ -541,9 +597,9 @@ func (s *Server) handleV2Upload(w http.ResponseWriter, r *http.Request) {
 	defer file.Close()
 
 	result, err := s.fileSvc.SaveUpload(r.Context(), appsvc.FileUploadInput{
-		SenderID:         claims.UserID,
-		SenderUsername:   claims.Username,
-		SenderNickname:   claims.Nickname,
+		SenderID:         identity.UserID,
+		SenderUsername:   identity.Username,
+		SenderNickname:   identity.Nickname,
 		ReceiverUsername: r.FormValue("receiverUsername"),
 		FileName:         header.Filename,
 		MIMEType:         header.Header.Get("Content-Type"),
@@ -575,7 +631,7 @@ func (s *Server) handleV2Upload(w http.ResponseWriter, r *http.Request) {
 	} else {
 		body := eventJSON("chat.private.message", "", result.Message)
 		_ = s.sessions.Send(result.ReceiverUsername, body)
-		_ = s.sessions.Send(claims.Username, body)
+		_ = s.sessions.Send(identity.Username, body)
 	}
 
 	writeJSON(w, http.StatusCreated, protocolv2.APIResponse[protocolv2.UploadResponse]{
@@ -640,12 +696,17 @@ func (s *Server) handleV2Download(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleV2CreateGroup(w http.ResponseWriter, r *http.Request) {
 	claims := claimsFrom(r)
+	identity, err := s.userSvc.GetIdentity(r.Context(), claims.UserID)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "token is invalid or expired")
+		return
+	}
 	var req protocolv2.CreateGroupRequest
 	if !decodeJSON(w, r, &req) {
 		return
 	}
 
-	group, err := s.groupSvc.CreateGroup(r.Context(), claims.UserID, claims.Username, claims.Nickname, req.GroupName, req.Members)
+	group, err := s.groupSvc.CreateGroup(r.Context(), identity.UserID, identity.Username, identity.Nickname, req.GroupName, req.Members)
 	switch {
 	case errors.Is(err, appsvc.ErrGroupNameRequired) || errors.Is(err, appsvc.ErrGroupNameTooLong):
 		writeError(w, http.StatusBadRequest, "bad_request", err.Error())

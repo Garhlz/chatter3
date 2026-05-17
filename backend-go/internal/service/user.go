@@ -18,6 +18,7 @@ import (
 	"github.com/elaine/chatter2/backend-go/internal/auth"
 	protocolv2 "github.com/elaine/chatter2/backend-go/internal/protocol/v2"
 	"github.com/elaine/chatter2/backend-go/internal/repository/sqlcgen"
+	"github.com/elaine/chatter2/backend-go/internal/session"
 )
 
 var (
@@ -27,19 +28,24 @@ var (
 	// ErrInvalidCredentials deliberately merges "unknown user" and "wrong password".
 	// This prevents the API from leaking which usernames exist.
 	ErrInvalidCredentials = errors.New("invalid username or password")
+
+	// ErrInvalidProfileInput marks profile validation failures as client errors.
+	ErrInvalidProfileInput = errors.New("invalid profile input")
 )
 
 // UserService handles user-related business logic.
 type UserService struct {
-	queries *sqlcgen.Queries
-	jwtSvc  *auth.JWTService
+	queries  *sqlcgen.Queries
+	jwtSvc   *auth.JWTService
+	sessions *session.Manager
 }
 
 // NewUserService creates a new user service.
-func NewUserService(queries *sqlcgen.Queries, jwtSvc *auth.JWTService) *UserService {
+func NewUserService(queries *sqlcgen.Queries, jwtSvc *auth.JWTService, sessions *session.Manager) *UserService {
 	return &UserService{
-		queries: queries,
-		jwtSvc:  jwtSvc,
+		queries:  queries,
+		jwtSvc:   jwtSvc,
+		sessions: sessions,
 	}
 }
 
@@ -117,4 +123,123 @@ func (s *UserService) Login(ctx context.Context, username, password string) (str
 		Nickname: dbUser.Nickname,
 		Online:   false,
 	}, nil
+}
+
+// GetUserProfile returns a user's public profile. Email is only included when
+// the caller requests their own profile.
+func (s *UserService) GetUserProfile(ctx context.Context, username string, callerUserID int64) (*protocolv2.OwnProfile, error) {
+	row, err := s.queries.GetUserProfile(ctx, username)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, fmt.Errorf("user not found")
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get user profile: %w", err)
+	}
+
+	profile := &protocolv2.OwnProfile{
+		UserProfile: protocolv2.UserProfile{
+			User: protocolv2.User{
+				UserID:    row.UserID,
+				Username:  row.Username,
+				Nickname:  row.Nickname,
+				AvatarURL: row.AvatarUrl,
+			},
+			Bio:       row.Bio,
+			Gender:    row.Gender,
+			CreatedAt: row.CreatedAt.Time.UTC().Format("2006-01-02T15:04:05Z"),
+		},
+	}
+	if row.UserID == callerUserID && row.Email != nil {
+		profile.Email = *row.Email
+	}
+	return profile, nil
+}
+
+// UpdateUserProfile updates the calling user's own profile fields.
+func (s *UserService) UpdateUserProfile(ctx context.Context, userID int64, req *protocolv2.UpdateProfileRequest) (*protocolv2.OwnProfile, error) {
+	row, err := s.queries.GetUserByID(ctx, userID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, fmt.Errorf("user not found")
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get user: %w", err)
+	}
+
+	if req.Nickname != nil && len(*req.Nickname) > 50 {
+		return nil, fmt.Errorf("%w: nickname must be 50 characters or fewer", ErrInvalidProfileInput)
+	}
+
+	params := sqlcgen.UpdateUserProfileParams{
+		UserID:   userID,
+		Nickname: row.Nickname,
+		Bio:      row.Bio,
+		Email:    row.Email,
+		Gender:   row.Gender,
+	}
+	if req.Nickname != nil {
+		params.Nickname = *req.Nickname
+	}
+	if req.Bio != nil {
+		params.Bio = *req.Bio
+	}
+	if req.Email != nil {
+		v := *req.Email
+		params.Email = &v
+	}
+	if req.Gender != nil {
+		params.Gender = *req.Gender
+	}
+	if err := s.queries.UpdateUserProfile(ctx, params); err != nil {
+		return nil, fmt.Errorf("failed to update profile: %w", err)
+	}
+
+	row, err = s.queries.GetUserByID(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to reload user: %w", err)
+	}
+
+	if s.sessions != nil {
+		s.sessions.UpdateNickname(row.UserID, row.Nickname)
+	}
+
+	return &protocolv2.OwnProfile{
+		UserProfile: protocolv2.UserProfile{
+			User: protocolv2.User{
+				UserID:    row.UserID,
+				Username:  row.Username,
+				Nickname:  row.Nickname,
+				AvatarURL: row.AvatarUrl,
+			},
+			Bio:       row.Bio,
+			Gender:    row.Gender,
+			CreatedAt: row.CreatedAt.Time.UTC().Format("2006-01-02T15:04:05Z"),
+		},
+		Email: stringOrEmpty(row.Email),
+	}, nil
+}
+
+// GetIdentity returns the latest persisted public identity for a user.
+func (s *UserService) GetIdentity(ctx context.Context, userID int64) (*protocolv2.User, error) {
+	row, err := s.queries.GetUserByID(ctx, userID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, fmt.Errorf("user not found")
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get user: %w", err)
+	}
+
+	return &protocolv2.User{
+		UserID:    row.UserID,
+		Username:  row.Username,
+		Nickname:  row.Nickname,
+		AvatarURL: row.AvatarUrl,
+		Online:    false,
+	}, nil
+}
+
+func stringOrEmpty(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }
