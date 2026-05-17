@@ -102,6 +102,9 @@ The current UI direction is Workbench-style, with:
 - Theme mode defaults to `system` and can be manually set to day or night.
 - Page-level global feedback for notice/error/auth-expired state.
 - A topbar + sidebar + main-stage layout, with mobile sidebar toggle support.
+- A profile modal that doubles as the main identity and "start chat" entry point.
+- Group conversations split into a message area plus a stable group info panel.
+- Conversation cards distinguish public/private/group scope and support empty private shells.
 
 ## Working Rules
 

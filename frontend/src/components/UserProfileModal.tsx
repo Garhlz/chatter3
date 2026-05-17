@@ -16,9 +16,11 @@ type ProfileData = {
 export function UserProfileModal({
   username,
   onClose,
+  onStartConversation,
 }: {
   username: string;
   onClose: () => void;
+  onStartConversation?: (username: string) => void;
 }) {
   const language = useChatStore((state) => state.language);
   const token = useChatStore((state) => state.token);
@@ -193,7 +195,7 @@ export function UserProfileModal({
             </div>
           ) : (
             <div className="profile-view">
-              <div className="profile-field">
+              <div className="profile-hero">
                 {profile.user.avatarUrl && (
                   <img
                     src={profile.user.avatarUrl}
@@ -201,8 +203,44 @@ export function UserProfileModal({
                     className="profile-avatar"
                   />
                 )}
-                <strong>{profile.user.nickname}</strong>
-                <span>@{profile.user.username}</span>
+                <div className="profile-hero-copy">
+                  <div className="profile-hero-headline">
+                    <strong>{profile.user.nickname}</strong>
+                    <span
+                      className={`scope-badge ${
+                        profile.user.online ? "scope-badge-live" : ""
+                      }`}
+                    >
+                      {profile.user.online
+                        ? t(language, "chat.live")
+                        : t(language, "chat.offline")}
+                    </span>
+                  </div>
+                  <span>@{profile.user.username}</span>
+                  <small>
+                    {t(language, "profile.joined")}{" "}
+                    {new Date(profile.createdAt).toLocaleDateString()}
+                  </small>
+                </div>
+              </div>
+              <div className="profile-actions">
+                {isOwn ? (
+                  <button
+                    type="button"
+                    onClick={() => setEditing(true)}
+                    className="secondary-button profile-edit-trigger"
+                  >
+                    {t(language, "profile.edit")}
+                  </button>
+                ) : onStartConversation ? (
+                  <button
+                    type="button"
+                    className="primary-button"
+                    onClick={() => onStartConversation(username)}
+                  >
+                    {t(language, "profile.startConversation")}
+                  </button>
+                ) : null}
               </div>
               {genderLabel(profile.gender) && (
                 <div className="profile-field">
@@ -215,24 +253,11 @@ export function UserProfileModal({
                   <p>{profile.bio}</p>
                 </div>
               )}
-              <div className="profile-field">
-                <span className="text-muted">{t(language, "profile.joined")}</span>
-                <span>{new Date(profile.createdAt).toLocaleDateString()}</span>
-              </div>
               {isOwn && profile.email && (
                 <div className="profile-field">
                   <span className="text-muted">{t(language, "profile.email")}</span>
                   <span>{profile.email}</span>
                 </div>
-              )}
-              {isOwn && (
-                <button
-                  type="button"
-                  onClick={() => setEditing(true)}
-                  className="secondary-button profile-edit-trigger"
-                >
-                  {t(language, "profile.edit")}
-                </button>
               )}
             </div>
           )
