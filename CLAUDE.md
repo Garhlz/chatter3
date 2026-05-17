@@ -12,7 +12,7 @@ Chatter3 is a rewrite of an older chat system:
 - `docs/protocol-v1.md`: historical TCP + JSON + newline protocol.
 - `docs/protocol-v2.md`: current HTTP + JSON and WebSocket + JSON contract.
 
-Current stable frontend/backend contract: auth, history, online users, WebSocket session, public/private/group text messages, file upload/download, and file message events.
+Current stable frontend/backend contract: auth, history, online users, WebSocket session, public/private/group text messages, file upload/download, file message events, group membership management, and user profile read/update.
 
 Current unstable or missing contract: group file upload, group deletion, read receipts, recall, and multi-device sync.
 
@@ -78,22 +78,19 @@ Frontend layering:
 ```text
 components/         -> React panels
 store/              -> zustand state and actions
-api/client.ts       -> HTTP client
-realtime/client.ts  -> WebSocket client
+api/client.ts       -> browser HTTP client
+realtime/client.ts  -> browser WebSocket client
+desktop.ts          -> Tauri/browser bridge
 hooks/              -> shared UI hooks
 ```
 
-The Tauri Rust layer currently handles desktop capabilities: tray, single-instance activation, notifications, window state, dialog/opener/process/store plugins, and local message persistence via SQLite (rusqlite bundled). It also hosts HTTP and WebSocket protocol clients (api.rs, realtime.rs) using reqwest + tokio-tungstenite, exposing 13 HTTP commands and 3 WS commands to the frontend via Tauri invoke. The JS layer accesses these through a unified API (desktop.ts) that delegates to Tauri invoke in desktop mode and falls back to the original JS clients (api/client.ts, realtime/client.ts) for browser dev mode.
+The Tauri Rust layer handles tray, single-instance activation, notifications, window state, store/keyring integration, local message persistence via SQLite, and the desktop-side HTTP/WS clients. The JS layer accesses these through `frontend/src/desktop.ts`, which delegates to Tauri invoke in desktop mode and falls back to browser HTTP/WS clients in dev mode.
 
 Token storage is OS credential-store backed in Tauri through the Rust `keyring` crate. This maps to Windows Credential Manager, macOS Keychain, and Linux Secret Service / libsecret. Browser dev still uses `localStorage`.
 
-The Tauri path migrates legacy JWTs from the previous Tauri store or `localStorage` into the OS credential store and removes the old copies.
-
 Language and theme preferences are persisted through the desktop abstraction: Tauri uses `tauri-plugin-store`, while browser dev uses `localStorage`.
 
-Local chat messages are persisted to a SQLite database via `rusqlite` (bundled). The `db.rs` module exposes 7 Tauri commands (message insert/get/confirm/update-status, conversation upsert/get/update-unread) that the JS layer calls from `desktop.ts`. On startup, messages are loaded from SQLite for instant display before the HTTP history refresh; on each realtime message or send, a single row is inserted. Browser dev mode falls back to localStorage JSON blobs.
-
-Single-instance activation is implemented: repeat launches focus the existing main window instead of creating a second desktop session.
+Local chat messages are persisted to SQLite in Tauri and to localStorage snapshots in browser dev fallback. On startup, the frontend loads local messages first for instant display, then refreshes public history, online users, and groups from the server.
 
 ## Frontend UI State
 
@@ -103,7 +100,8 @@ The current UI direction is Workbench-style, with:
 - Day theme based on a warmer Catppuccin Latte palette.
 - Night theme based on One Dark.
 - Theme mode defaults to `system` and can be manually set to day or night.
-- Language and theme preferences are persisted in `localStorage`.
+- Page-level global feedback for notice/error/auth-expired state.
+- A topbar + sidebar + main-stage layout, with mobile sidebar toggle support.
 
 ## Working Rules
 
