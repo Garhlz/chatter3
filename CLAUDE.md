@@ -12,7 +12,7 @@ Chatter3 is a rewrite of an older chat system:
 - `docs/protocol-v1.md`: historical TCP + JSON + newline protocol.
 - `docs/protocol-v2.md`: current HTTP + JSON and WebSocket + JSON contract.
 
-Current stable frontend/backend contract: auth, history, online users, WebSocket session, public/private/group text messages, file upload/download, file message events, group membership management, and user profile read/update.
+Current stable frontend/backend contract: auth, history, online users, WebSocket session, public/private/group text messages, file upload/download, file message events, group detail/member/history access with member-only visibility, transactional group membership writes, and user profile read/update.
 
 Current unstable or missing contract: group file upload, group deletion, read receipts, recall, and multi-device sync.
 
@@ -22,7 +22,7 @@ Current unstable or missing contract: group file upload, group deletion, read re
 - Backend execution: `backend-go/TODO.md`
 - Architecture map: `docs/dev-architecture.md`
 - Protocol contract: `docs/protocol-v2.md`
-- Collaboration and commit preferences: `AGENT.MD`
+- Collaboration and commit preferences: `AGENT.md`
 
 The root `TODO.md` is only a high-level project navigation and archive. Do not treat it as the active execution queue.
 
@@ -108,7 +108,7 @@ The current UI direction is Workbench-style, with:
 
 ## Working Rules
 
-- Follow `AGENT.MD` for commit message style and explanatory comments.
+- Follow `AGENT.md` for commit message style and explanatory comments.
 - Prefer Web UI validation through Vite in remote Linux environments.
 - Run `npm run typecheck` and `npm run build` for frontend changes.
 - Run relevant Go tests for backend changes.

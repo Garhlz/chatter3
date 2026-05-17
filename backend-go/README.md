@@ -224,6 +224,8 @@ JWT_EXPIRATION=24h
    - `DELETE /api/v2/groups/{groupID}/members/{username}`
    - `GET /api/v2/groups/{groupID}/history`
    - `chat.group.send -> chat.group.message`
+   - 群详情、成员列表、群历史都要求调用者是群成员
+   - 建群与批量加人具备事务回滚语义，不会留下半成品成员写入
 
 仍属于增强/后续项：
 
@@ -258,9 +260,13 @@ JWT_EXPIRATION=24h
 当前群组约束：
 
 - 不存在的群组资源返回 `not_found`
+- 非成员访问群详情返回 `forbidden`
+- 非成员访问群成员列表返回 `forbidden`
 - 非成员访问群历史返回 `forbidden`
 - 非管理员/群主添加或移除其他成员返回 `forbidden`
 - 不能移除群主
+- 建群时如果初始成员中途校验失败，整次创建回滚
+- 批量加人时如果中途有成员不存在，整次加人回滚
 
 ## 协议稳定性
 
@@ -277,14 +283,20 @@ JWT_EXPIRATION=24h
 - 未知私聊对象、未知私聊文件接收者统一返回 `not_found`
 - 附件元数据中的 MIME type 允许为空字符串
 - 群组缺失资源统一返回 `not_found`
+- 群详情 / 成员 / 历史的成员可见性统一返回 `forbidden`
 - 群成员权限不足统一返回 `forbidden`
+- 建群和批量加人的写入具备事务一致性
 
 还不稳定：
 
+- 群文件上传
+- 删群
 - 已读、撤回、多端同步等扩展能力
 
 未完成：
 
+- 群文件上传
+- 删群
 - 已读回执、撤回、多端同步
 
 ## 目录结构
