@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	protocolv2 "github.com/elaine/chatter2/backend-go/internal/protocol/v2"
 	"github.com/elaine/chatter2/backend-go/internal/repository"
@@ -34,15 +35,17 @@ const (
 
 // GroupService owns group and group-message business rules.
 type GroupService struct {
+	pool     *pgxpool.Pool
 	queries  *sqlcgen.Queries
 	sessions *session.Manager
 }
 
 func NewGroupService(
+	pool *pgxpool.Pool,
 	queries *sqlcgen.Queries,
 	sessions *session.Manager,
 ) *GroupService {
-	return &GroupService{queries: queries, sessions: sessions}
+	return &GroupService{pool: pool, queries: queries, sessions: sessions}
 }
 
 // CreateGroup inserts a group, makes the creator owner, and optionally adds initial members.
@@ -55,7 +58,19 @@ func (s *GroupService) CreateGroup(ctx context.Context, creatorUserID int64, cre
 		return nil, ErrGroupNameTooLong
 	}
 
-	row, err := s.queries.CreateGroup(ctx, sqlcgen.CreateGroupParams{
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback(ctx)
+		}
+	}()
+
+	q := s.queries.WithTx(tx)
+
+	row, err := q.CreateGroup(ctx, sqlcgen.CreateGroupParams{
 		GroupName: groupName,
 		CreatorID: creatorUserID,
 	})
@@ -63,7 +78,7 @@ func (s *GroupService) CreateGroup(ctx context.Context, creatorUserID int64, cre
 		return nil, err
 	}
 
-	if err := s.queries.AddGroupMember(ctx, sqlcgen.AddGroupMemberParams{
+	if err := q.AddGroupMember(ctx, sqlcgen.AddGroupMemberParams{
 		GroupID: row.GroupID,
 		UserID:  creatorUserID,
 		Role:    GroupRoleOwner,
@@ -77,14 +92,14 @@ func (s *GroupService) CreateGroup(ctx context.Context, creatorUserID int64, cre
 		if uname == "" || uname == creatorUsername {
 			continue
 		}
-		u, err := s.queries.GetUserByUsername(ctx, uname)
+		u, err := q.GetUserByUsername(ctx, uname)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrMemberNotFound
 		}
 		if err != nil {
 			return nil, err
 		}
-		if err := s.queries.AddGroupMember(ctx, sqlcgen.AddGroupMemberParams{
+		if err := q.AddGroupMember(ctx, sqlcgen.AddGroupMemberParams{
 			GroupID: row.GroupID,
 			UserID:  u.UserID,
 			Role:    GroupRoleMember,
@@ -92,6 +107,10 @@ func (s *GroupService) CreateGroup(ctx context.Context, creatorUserID int64, cre
 			return nil, err
 		}
 		memberCount++
+	}
+
+	if err = tx.Commit(ctx); err != nil {
+		return nil, err
 	}
 
 	return &protocolv2.Group{
@@ -137,8 +156,12 @@ func (s *GroupService) GetUserGroups(ctx context.Context, userID int64) ([]proto
 	return groups, nil
 }
 
-// GetGroupByID returns a single group by ID.
-func (s *GroupService) GetGroupByID(ctx context.Context, groupID int64) (*protocolv2.Group, error) {
+// GetGroupByIDForUser returns a single group by ID for a member of that group.
+func (s *GroupService) GetGroupByIDForUser(ctx context.Context, userID, groupID int64) (*protocolv2.Group, error) {
+	if err := s.ensureGroupMember(ctx, userID, groupID); err != nil {
+		return nil, err
+	}
+
 	row, err := s.queries.GetGroupByID(ctx, groupID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, repository.ErrNotFound
@@ -164,9 +187,9 @@ func (s *GroupService) GetGroupByID(ctx context.Context, groupID int64) (*protoc
 	}, nil
 }
 
-// GetGroupMembers returns the member list for a group.
-func (s *GroupService) GetGroupMembers(ctx context.Context, groupID int64) ([]protocolv2.GroupMember, error) {
-	if err := s.ensureGroupExists(ctx, groupID); err != nil {
+// GetGroupMembersForUser returns the member list for a group visible to its members.
+func (s *GroupService) GetGroupMembersForUser(ctx context.Context, userID, groupID int64) ([]protocolv2.GroupMember, error) {
+	if err := s.ensureGroupMember(ctx, userID, groupID); err != nil {
 		return nil, err
 	}
 
@@ -325,19 +348,31 @@ func (s *GroupService) AddMembers(ctx context.Context, callerUserID, groupID int
 		return nil, ErrNotGroupAdmin
 	}
 
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if err != nil {
+			_ = tx.Rollback(ctx)
+		}
+	}()
+
+	q := s.queries.WithTx(tx)
+
 	for _, uname := range usernames {
 		uname = strings.TrimSpace(uname)
 		if uname == "" {
 			continue
 		}
-		u, err := s.queries.GetUserByUsername(ctx, uname)
+		u, err := q.GetUserByUsername(ctx, uname)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrMemberNotFound
 		}
 		if err != nil {
 			return nil, err
 		}
-		if err := s.queries.AddGroupMember(ctx, sqlcgen.AddGroupMemberParams{
+		if err := q.AddGroupMember(ctx, sqlcgen.AddGroupMemberParams{
 			GroupID: groupID,
 			UserID:  u.UserID,
 			Role:    GroupRoleMember,
@@ -346,7 +381,11 @@ func (s *GroupService) AddMembers(ctx context.Context, callerUserID, groupID int
 		}
 	}
 
-	return s.GetGroupMembers(ctx, groupID)
+	if err = tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+
+	return s.GetGroupMembersForUser(ctx, callerUserID, groupID)
 }
 
 // RemoveMember removes a user from a group. Caller must be admin/owner, or the user themselves.
@@ -405,4 +444,22 @@ func (s *GroupService) ensureGroupExists(ctx context.Context, groupID int64) err
 		return repository.ErrNotFound
 	}
 	return err
+}
+
+func (s *GroupService) ensureGroupMember(ctx context.Context, userID, groupID int64) error {
+	if err := s.ensureGroupExists(ctx, groupID); err != nil {
+		return err
+	}
+
+	count, err := s.queries.IsGroupMember(ctx, sqlcgen.IsGroupMemberParams{
+		GroupID: groupID,
+		UserID:  userID,
+	})
+	if err != nil {
+		return err
+	}
+	if count == 0 {
+		return ErrNotGroupMember
+	}
+	return nil
 }
