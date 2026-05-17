@@ -8,6 +8,7 @@ export type Conversation = {
   scope: ConversationScope;
   title: string;
   peerUsername: string;
+  peerNickname?: string;
   description: string;
   lastMessage?: string;
   updatedAt?: string;
@@ -16,6 +17,9 @@ export type Conversation = {
   groupID?: number;
   memberCount?: number;
   members?: import("../protocol").GroupMember[];
+  creatorUsername?: string;
+  creatorNickname?: string;
+  kindLabel?: "public" | "private" | "group";
 };
 
 export type ChatMessageView = ChatMessage & {
@@ -42,15 +46,18 @@ export function conversationIdFor(scope: ConversationScope, peer = "") {
 export function privateConversation(
   username: string,
   online?: boolean,
+  nickname?: string,
 ): Conversation {
   return {
     id: conversationIdFor("private", username),
     scope: "private",
-    title: `Direct: ${username}`,
+    title: nickname || username,
     peerUsername: username,
-    description: `Private channel with @${username}`,
+    peerNickname: nickname,
+    description: `@${username}`,
     unreadCount: 0,
     online,
+    kindLabel: "private",
   };
 }
 
@@ -64,6 +71,9 @@ export function groupConversation(group: Group): Conversation {
     unreadCount: 0,
     groupID: group.groupID,
     memberCount: group.memberCount,
+    creatorUsername: group.creator.username,
+    creatorNickname: group.creator.nickname,
+    kindLabel: "group",
   };
 }
 
@@ -81,6 +91,7 @@ export function publicConversation(
     updatedAt: lastMessage?.timestamp,
     unreadCount: 0,
     online: true,
+    kindLabel: "public",
   };
 }
 

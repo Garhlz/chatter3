@@ -1,6 +1,10 @@
 import { useRef } from "react";
 import { useShallow } from "zustand/shallow";
 import { Composer } from "./Composer";
+import {
+  conversationDisplayTitle,
+  conversationStaticSummary,
+} from "./conversationPresentation";
 import { GroupPanel } from "./GroupPanel";
 import { MessageList } from "./MessageList";
 import { t } from "../i18n";
@@ -69,7 +73,9 @@ export function ChatPanel({ onProfileOpen }: { onProfileOpen: (username: string)
     activeConversation.scope === "public"
       ? t(language, "chat.publicTitle")
       : activeConversation.scope === "private"
-        ? t(language, "chat.directTitle", { name: activeConversation.peerUsername })
+        ? t(language, "chat.directTitle", {
+            name: conversationDisplayTitle(activeConversation),
+          })
         : activeConversation.title;
 
   return (
@@ -85,7 +91,7 @@ export function ChatPanel({ onProfileOpen }: { onProfileOpen: (username: string)
         <div>
           <p className="section-label">{t(language, "chat.conversation")} / {historyScopeLabel}</p>
           <h2>{conversationTitle}</h2>
-          <small>{activeConversation.description}</small>
+          <small>{conversationStaticSummary(language, activeConversation)}</small>
         </div>
         <div className="header-actions">
           <span className="scope-badge">{messageCountLabel}</span>
@@ -136,9 +142,14 @@ export function ChatPanel({ onProfileOpen }: { onProfileOpen: (username: string)
         </div>
       </header>
 
-      <MessageList onProfileOpen={onProfileOpen} />
-
-      <GroupPanel />
+      {activeConversation.scope === "group" ? (
+        <div className="group-chat-layout">
+          <MessageList onProfileOpen={onProfileOpen} />
+          <GroupPanel onProfileOpen={onProfileOpen} />
+        </div>
+      ) : (
+        <MessageList onProfileOpen={onProfileOpen} />
+      )}
 
       {lastSelectedFile && !uploadingFile ? (
         <div className="callout neutral file-callout">

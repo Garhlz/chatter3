@@ -100,9 +100,14 @@ type TranslationKey =
   | "group.noMembersHint"
   | "group.addPlaceholder"
   | "group.addMembers"
+  | "group.summaryMembers"
+  | "group.summaryCreator"
+  | "group.summaryRole"
   | "group.confirmRemove"
   | "group.confirmRemoveHint"
+  | "group.confirmRemoveContext"
   | "group.cancelRemove"
+  | "group.createdBy"
   | "status.idle"
   | "status.connecting"
   | "status.connected"
@@ -159,6 +164,9 @@ type TranslationKey =
   | "conv.viewProfile"
   | "conv.noResults"
   | "conv.noResultsHint"
+  | "conv.publicSummary"
+  | "conv.groupSummary"
+  | "conv.emptyState"
   | "modal.groupTitle"
   | "modal.createGroup"
   | "modal.groupName"
@@ -183,7 +191,15 @@ type TranslationKey =
   | "profile.edit"
   | "profile.loadError"
   | "profile.saveError"
-  | "profile.notFound";
+  | "profile.notFound"
+  | "profile.startConversation"
+  | "conv.emptyPrivate"
+  | "group.roleOwner"
+  | "group.roleAdmin"
+  | "group.roleMember"
+  | "group.roleOwnerHint"
+  | "group.roleAdminHint"
+  | "group.roleMemberHint";
 
 const dictionaries: Record<Language, Record<TranslationKey, string>> = {
   "zh-CN": {
@@ -288,8 +304,12 @@ const dictionaries: Record<Language, Record<TranslationKey, string>> = {
     "group.noMembersHint": "刷新群组历史后可查看成员。",
     "group.addPlaceholder": "要添加的用户名，用逗号分隔",
     "group.addMembers": "添加成员",
+    "group.summaryMembers": "成员数",
+    "group.summaryCreator": "创建者",
+    "group.summaryRole": "我的权限",
     "group.confirmRemove": "确认移除成员",
     "group.confirmRemoveHint": "将 {name} 移出当前群聊。",
+    "group.confirmRemoveContext": "该操作仅对管理员和群主可用。",
     "group.cancelRemove": "取消",
     "status.idle": "未连接",
     "status.connecting": "连接中",
@@ -344,6 +364,9 @@ const dictionaries: Record<Language, Record<TranslationKey, string>> = {
     "conv.viewProfile": "查看资料",
     "conv.noResults": "无匹配会话",
     "conv.noResultsHint": "尝试调整搜索内容",
+    "conv.publicSummary": "公共消息频道",
+    "conv.groupSummary": "{count} 位成员 · 创建者 @{creator}",
+    "conv.emptyState": "尚无消息",
     "modal.groupTitle": "创建群聊",
     "modal.createGroup": "创建群",
     "modal.groupName": "群名称",
@@ -369,6 +392,15 @@ const dictionaries: Record<Language, Record<TranslationKey, string>> = {
     "profile.loadError": "加载资料失败",
     "profile.saveError": "保存资料失败",
     "profile.notFound": "用户不存在",
+    "profile.startConversation": "发起聊天",
+    "conv.emptyPrivate": "与 @{name} 的私聊",
+    "group.createdBy": "创建者 @{name}",
+    "group.roleOwner": "群主",
+    "group.roleAdmin": "管理员",
+    "group.roleMember": "成员",
+    "group.roleOwnerHint": "你是该群群主",
+    "group.roleAdminHint": "你是该群管理员",
+    "group.roleMemberHint": "你是该群成员",
     "error.restoreSession": "恢复保存会话失败",
   },
   "en-US": {
@@ -473,8 +505,12 @@ const dictionaries: Record<Language, Record<TranslationKey, string>> = {
     "group.noMembersHint": "Reload group history to see members.",
     "group.addPlaceholder": "Usernames to add, comma-separated",
     "group.addMembers": "Add members",
+    "group.summaryMembers": "Members",
+    "group.summaryCreator": "Creator",
+    "group.summaryRole": "Your role",
     "group.confirmRemove": "Confirm member removal",
     "group.confirmRemoveHint": "Remove {name} from this group.",
+    "group.confirmRemoveContext": "This action is only available to owners and admins.",
     "group.cancelRemove": "Cancel",
     "status.idle": "Idle",
     "status.connecting": "Connecting",
@@ -529,6 +565,9 @@ const dictionaries: Record<Language, Record<TranslationKey, string>> = {
     "conv.viewProfile": "View profile",
     "conv.noResults": "No matching conversations",
     "conv.noResultsHint": "Try a different search term",
+    "conv.publicSummary": "Shared broadcast channel",
+    "conv.groupSummary": "{count} members · created by @{creator}",
+    "conv.emptyState": "No messages yet",
     "modal.groupTitle": "Create group",
     "modal.createGroup": "Create group",
     "modal.groupName": "Group name",
@@ -554,6 +593,15 @@ const dictionaries: Record<Language, Record<TranslationKey, string>> = {
     "profile.loadError": "Failed to load profile",
     "profile.saveError": "Failed to save profile",
     "profile.notFound": "User not found",
+    "profile.startConversation": "Start chat",
+    "conv.emptyPrivate": "Private with @{name}",
+    "group.createdBy": "Created by @{name}",
+    "group.roleOwner": "Group owner",
+    "group.roleAdmin": "Group admin",
+    "group.roleMember": "Member",
+    "group.roleOwnerHint": "You are the group owner",
+    "group.roleAdminHint": "You are a group admin",
+    "group.roleMemberHint": "You are a member",
     "error.restoreSession": "Failed to restore saved session",
   },
 };

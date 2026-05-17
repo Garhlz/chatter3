@@ -2,6 +2,12 @@ import { useState } from "react";
 import { useShallow } from "zustand/shallow";
 import { t } from "../i18n";
 import {
+  conversationDisplayTitle,
+  conversationIsEmptyShell,
+  conversationListSecondaryText,
+  conversationScopeLabel,
+} from "./conversationPresentation";
+import {
   selectConversationList,
   useChatStore,
 } from "../store/chatStore";
@@ -28,7 +34,10 @@ export function ConversationList({
     ? conversations.filter(
         (c) =>
           c.title.toLowerCase().includes(query.toLowerCase()) ||
-          c.peerUsername.toLowerCase().includes(query.toLowerCase()),
+          c.peerNickname?.toLowerCase().includes(query.toLowerCase()) ||
+          c.peerUsername.toLowerCase().includes(query.toLowerCase()) ||
+          c.description.toLowerCase().includes(query.toLowerCase()) ||
+          c.creatorUsername?.toLowerCase().includes(query.toLowerCase()),
       )
     : conversations;
 
@@ -68,6 +77,8 @@ export function ConversationList({
             type="button"
             key={conversation.id}
             className={`channel-card ${
+              `channel-card-${conversation.kindLabel ?? conversation.scope}`
+            } ${
               activeConversationId === conversation.id
                 ? "channel-card-active"
                 : ""
@@ -75,32 +86,50 @@ export function ConversationList({
             onClick={() => openConversation(conversation.id)}
             onClickCapture={() => onConversationOpen?.()}
           >
-            <span
-              className={`channel-pulse ${
-                conversation.online === false ? "channel-pulse-muted" : ""
-              }`}
-            />
-            <strong>{conversation.title}</strong>
-            <small>
-              {conversation.lastMessage ??
-                (token
-                  ? conversation.description
-                  : t(language, "conversations.loginRequired"))}
-            </small>
-            {conversation.scope === "private" && conversation.peerUsername && (
-              <button
-                type="button"
-                className="conv-profile-link"
-                onClick={(e) => { e.stopPropagation(); onProfileOpen(conversation.peerUsername); }}
-                aria-label={t(language, "conv.viewProfile")}
-                title={t(language, "conv.viewProfile")}
-              >
-                &#9432;
-              </button>
-            )}
-            {conversation.unreadCount > 0 && (
-              <em>{conversation.unreadCount}</em>
-            )}
+            {conversation.scope === "private" ? (
+              <span
+                className={`channel-pulse ${
+                  conversation.online === false ? "channel-pulse-muted" : ""
+                }`}
+              />
+            ) : null}
+            <div className="channel-card-main">
+              <div className="channel-card-title-row">
+                <strong>{conversationDisplayTitle(conversation)}</strong>
+                <span className="channel-kind-tag">
+                  {conversationScopeLabel(language, conversation)}
+                </span>
+              </div>
+              <small>
+                {token
+                  ? conversationListSecondaryText(language, conversation)
+                  : t(language, "conversations.loginRequired")}
+              </small>
+              {token && conversationIsEmptyShell(conversation) ? (
+                <span className="channel-empty-hint">
+                  {t(language, "conv.emptyState")}
+                </span>
+              ) : null}
+            </div>
+            <div className="channel-card-side">
+              {conversation.scope === "private" && conversation.peerUsername ? (
+                <button
+                  type="button"
+                  className="conv-profile-link"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onProfileOpen(conversation.peerUsername);
+                  }}
+                  aria-label={t(language, "conv.viewProfile")}
+                  title={t(language, "conv.viewProfile")}
+                >
+                  &#9432;
+                </button>
+              ) : null}
+              {conversation.unreadCount > 0 ? (
+                <em>{conversation.unreadCount}</em>
+              ) : null}
+            </div>
           </button>
         ))}
 

@@ -104,6 +104,10 @@ type ChatState = {
   loadPrivateHistory: (username?: string) => Promise<void>;
   loadOlderHistory: () => Promise<void>;
   openConversation: (conversationId: string) => void;
+  openPrivateConversation: (
+    username: string,
+    options?: { preloadHistory?: boolean },
+  ) => Promise<void>;
   reloadActiveHistory: () => Promise<void>;
   refreshOnlineUsers: () => Promise<void>;
   reconnect: () => void;
@@ -400,7 +404,7 @@ function buildSessionConversations(
   };
   for (const user of users) {
     conversations[conversationIdFor("private", user.username)] =
-      privateConversation(user.username, user.online);
+      privateConversation(user.username, user.online, user.nickname);
   }
   for (const group of groups) {
     conversations[conversationIdFor("group", String(group.groupID))] =
@@ -467,6 +471,14 @@ function scheduleArchivePersist(state: ChatState) {
 
 function localized(key: Parameters<typeof t>[1], params?: Parameters<typeof t>[2]) {
   return t(useChatStore.getState().language, key, params);
+}
+
+function derivePeerNickname(
+  messages: ChatMessageView[],
+  peerUsername: string,
+) {
+  return messages.find((message) => message.sender.username === peerUsername)?.sender
+    .nickname;
 }
 
 function expireSession(message?: string) {
@@ -565,7 +577,13 @@ function connectionHandlers() {
           onlineUsers: users,
           conversations: {
             ...state.conversations,
-            [cid]: { ...(previous ?? privateConversation(user.username)), online: user.online },
+            [cid]: {
+              ...(previous ??
+                privateConversation(user.username, user.online, user.nickname)),
+              title: previous?.peerNickname || user.nickname || previous?.title || user.username,
+              peerNickname: previous?.peerNickname || user.nickname,
+              online: user.online,
+            },
           },
         };
       });
@@ -614,7 +632,7 @@ function ingestRealtimeMessage(message: ChatMessage, requestId?: string) {
               memberCount: 0,
               createdAt: message.timestamp,
             })
-          : privateConversation(peer, true));
+          : privateConversation(peer, true, message.sender.nickname));
     const isActive = state.activeConversationId === cid;
     if (
       !isActive &&
@@ -842,7 +860,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
   loadPrivateHistory: async (username) => {
-    const { token, historyTarget } = get();
+    const { token, historyTarget, conversations, onlineUsers } = get();
     if (!token) { set({ error: t(get().language, "error.loginBeforePrivateHistory") }); return; }
     const peer = (username ?? historyTarget).trim();
     if (!peer) { set({ error: t(get().language, "error.enterPrivateUsername") }); return; }
@@ -852,6 +870,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const messages = normalizeMessages(history.data);
       const cid = conversationIdFor("private", peer);
       const lastMessage = messages.at(-1);
+      const peerNickname =
+        derivePeerNickname(messages, peer) ??
+        onlineUsers.find((user) => user.username === peer)?.nickname ??
+        conversations[cid]?.peerNickname;
       set((state) => ({
         activeConversationId: cid,
         historyLoading: false,
@@ -861,7 +883,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
         conversations: {
           ...state.conversations,
           [cid]: {
-            ...(state.conversations[cid] ?? privateConversation(peer)),
+            ...(state.conversations[cid] ??
+              privateConversation(peer, undefined, peerNickname)),
+            title: peerNickname || state.conversations[cid]?.title || peer,
+            peerNickname,
             lastMessage: lastMessage?.content,
             updatedAt: lastMessage?.timestamp,
             unreadCount: 0,
@@ -906,6 +931,42 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   // ── Conversations ──
+  openPrivateConversation: async (username, options) => {
+    const cid = conversationIdFor("private", username);
+    const shouldPreloadHistory = options?.preloadHistory === true;
+    set((state) => {
+      const existing = state.conversations[cid];
+      if (existing) {
+        return {
+          activeConversationId: cid,
+          historyTarget: username,
+          conversations: { ...state.conversations, [cid]: { ...existing, unreadCount: 0 } },
+        };
+      }
+      const onlineUser = state.onlineUsers.find((u) => u.username === username);
+      return {
+        activeConversationId: cid,
+        historyTarget: username,
+        conversations: {
+          ...state.conversations,
+          [cid]: {
+            id: cid,
+            scope: "private" as const,
+            title: onlineUser?.nickname || username,
+            peerUsername: username,
+            peerNickname: onlineUser?.nickname,
+            description: t(state.language, "conv.emptyPrivate", { name: username }),
+            unreadCount: 0,
+            online: onlineUser?.online,
+            kindLabel: "private",
+          },
+        },
+      };
+    });
+    if (shouldPreloadHistory) {
+      await get().loadPrivateHistory(username);
+    }
+  },
   openConversation: (conversationId) => {
     set((state) => {
       const conversation = state.conversations[conversationId];
@@ -926,7 +987,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
       set((state) => {
         const conversations = users.reduce<Record<string, Conversation>>((acc, user) => {
           const cid = conversationIdFor("private", user.username);
-          acc[cid] = { ...(state.conversations[cid] ?? privateConversation(user.username)), online: user.online };
+          const previous = state.conversations[cid];
+          acc[cid] = {
+            ...(previous ??
+              privateConversation(user.username, user.online, user.nickname)),
+            title: previous?.peerNickname || user.nickname || previous?.title || user.username,
+            peerNickname: previous?.peerNickname || user.nickname,
+            online: user.online,
+          };
           return acc;
         }, { ...state.conversations });
         return {
@@ -1317,7 +1385,12 @@ export function selectConversationList(state: ChatState) {
   return Object.values(state.conversations).sort((left, right) => {
     if (left.id === publicConversationId) return -1;
     if (right.id === publicConversationId) return 1;
-    return (right.updatedAt ?? "").localeCompare(left.updatedAt ?? "");
+    if (!left.updatedAt && right.updatedAt) return 1;
+    if (left.updatedAt && !right.updatedAt) return -1;
+    const leftTs = left.updatedAt;
+    const rightTs = right.updatedAt;
+    if (leftTs && rightTs) return rightTs.localeCompare(leftTs);
+    return left.title.localeCompare(right.title);
   });
 }
 

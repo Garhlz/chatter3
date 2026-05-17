@@ -30,6 +30,7 @@ export function App() {
     (state) => state.hydrateDesktopPreferences,
   );
   const disconnect = useChatStore((state) => state.disconnect);
+  const openPrivateConversation = useChatStore((state) => state.openPrivateConversation);
   const bootstrapSession = useChatStore((state) => state.bootstrapSession);
 
   const [showDev, setShowDev] = useState(false);
@@ -174,6 +175,10 @@ export function App() {
         <UserProfileModal
           username={profileUsername}
           onClose={() => setProfileUsername(null)}
+          onStartConversation={(username) => {
+            setProfileUsername(null);
+            void openPrivateConversation(username, { preloadHistory: false });
+          }}
         />
       )}
     </div>
