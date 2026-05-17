@@ -65,16 +65,13 @@ cd frontend
 npm run dev
 ```
 
-优先调试 Web UI，再让后端 `v2` 接口逐步接入。  
-只有在本地有桌面环境、或后续需要验证文件系统/窗口能力时，再运行 `npm run tauri:dev`。
+优先调试 Web UI，再让后端 `v2` 接口逐步接入。只有在本地有桌面环境、或需要验证文件系统、窗口、通知、凭据库时，再运行 `npm run tauri:dev`。
 
 当前推荐做法是：
 
 - 浏览器只访问前端 `Vite` 端口
 - 前端请求相对 `/api/...`
 - `Vite` 再把这些请求代理到后端 `http://127.0.0.1:8080`
-
-这样在远程开发时，你通常只需要转发前端端口，不需要再让浏览器直接访问远程后端地址。
 
 如果你确实需要改后端代理目标，可以在启动前端前覆盖：
 
@@ -92,136 +89,334 @@ cd frontend
 npm run dev
 ```
 
-## 当前范围
+## 当前已实现功能
 
-- 登录 / 注册
-- 聊天主界面
-- `protocol-v2` 对应的 HTTP client
-- `realtime client`
-- 基础连接状态与自动重连
-- 前端派生会话列表（公共大厅、私聊、群聊）
-- 消息发送状态反馈
-- 历史分页入口
-- 组件化 UI 面板
-- 桌面快捷键
-- 群聊创建、成员管理、群消息收发
-- 文件上传/下载与文件消息实时事件展示
-- 系统托盘（关闭窗口隐藏到托盘）
-- 单实例保护（重复启动激活已有窗口）
-- 托盘菜单显示主窗口、触发重连、退出
-- 窗口状态记忆（位置/大小重启恢复）
-- 原生 OS 通知（仅非当前会话且窗口未聚焦/不可见时触发，浏览器内 Notification API fallback）
-- 语言、主题本地持久化恢复（Tauri store，浏览器环境 fallback 到 localStorage）
-- JWT token 安全持久化恢复（Tauri 环境走系统凭据库，浏览器开发 fallback 到 localStorage）
-- SQLite 本地消息持久化（每消息逐行写入，启动时即时加载，浏览器 fallback 到 localStorage JSON blob）
+### 核心聊天能力
 
-群文件上传、删群、已读、撤回和多端同步暂未实现。
+- 登录、注册、启动恢复会话
+- 公共历史、私聊历史、群历史
+- 历史分页与加载更早消息
+- 在线用户列表与在线状态实时更新
+- 公共/私聊/群聊文本消息发送
+- optimistic message、发送确认、发送超时失败、失败重试
+- 会话派生、未读计数、会话切换
+- 公共/私聊文件上传
+- 文件下载入口与文件消息卡片展示
+- 群聊创建、群列表、成员列表、加人、移除成员
+- 用户资料查看与本人资料编辑
+
+### 当前 UI 与交互
+
+- 顶栏连接状态与 Dev 入口
+- 页面级全局反馈区 `notice/error/authExpired`
+- 左侧身份卡与偏好切换
+- 会话搜索、打开资料、建群弹窗
+- 多行消息输入框：`Enter` 发送，`Shift+Enter` 换行
+- 群成员移除的应用内确认区
+- 移动端侧栏开关、遮罩关闭、打开会话后自动收起
+- 快捷键：`Ctrl/Cmd+R` 重连，`Ctrl/Cmd+K` 聚焦历史输入，`Esc` 清反馈/取消焦点
+
+### 桌面能力
+
+- 系统托盘
+- 单实例保护
+- 窗口位置/大小/最大化状态恢复
+- 原生通知
+- 主题与语言本地持久化
+- JWT 持久化到系统凭据库
+- SQLite 本地消息缓存
+- 托盘重连事件、窗口聚焦/可见状态同步到前端
+
+## 当前未实现或未冻结
+
+- 群文件上传
+- 删群
+- 已读
+- 撤回
+- 多端同步
+- 完整桌面下载管理闭环
+
+## 前端状态与执行结构
+
+- `frontend/src/App.tsx`
+  - 页面骨架、顶栏、侧栏、主视图、全局反馈、弹窗挂载点
+- `frontend/src/store/chatStore.ts`
+  - 统一状态入口，集中管理认证、历史、realtime、会话、群聊、文件上传、本地恢复
+- `frontend/src/api/client.ts`
+  - 浏览器路径 HTTP client
+- `frontend/src/realtime/client.ts`
+  - 浏览器路径 WebSocket client
+- `frontend/src/desktop.ts`
+  - Tauri 与浏览器 fallback 的统一桌面抽象层
+
+## HTTP API 交互清单
+
+下面按“前端什么时候调、调完怎么更新状态”来写。
+
+### 认证
+
+- `POST /api/v2/auth/register`
+  - 入口：注册表单提交
+  - 请求：`username/password/nickname`
+  - 成功后：显示注册成功提示，并把用户名/密码回填到登录表单
+  - 失败后：显示后端错误
+
+- `POST /api/v2/auth/login`
+  - 入口：登录表单提交
+  - 请求：`username/password`
+  - 成功后：
+    - 保存 JWT
+    - 先尝试恢复本地 SQLite 或本地快照
+    - 并行拉公共历史、在线用户、群列表
+    - 建立 realtime 连接
+  - 失败后：显示登录错误
+
+### 在线状态
+
+- `GET /api/v2/users/online`
+  - 入口：
+    - 登录成功初始化
+    - 启动恢复会话初始化
+    - 手动刷新在线用户
+  - 成功后：
+    - 更新 `onlineUsers`
+    - 刷新私聊会话 `online` 状态
+    - 手动刷新时显示提示
+  - 失败后：显示错误；`401` 时清当前会话
+
+### 公共历史
+
+- `GET /api/v2/chats/public/history?limit=50`
+- `GET /api/v2/chats/public/history?limit=50&cursor=...`
+  - 入口：
+    - 登录成功初始化
+    - 启动恢复初始化
+    - 手动刷新公共大厅
+    - 加载更早消息
+  - 成功后：
+    - 刷新或追加公共大厅消息
+    - 更新 `historyCursors.public`
+    - 更新公共大厅会话摘要
+  - 失败后：显示历史错误；`401` 时清会话
+
+### 私聊历史
+
+- `GET /api/v2/chats/private/{username}/history?limit=50`
+- `GET /api/v2/chats/private/{username}/history?limit=50&cursor=...`
+  - 入口：
+    - 打开私聊
+    - 历史输入框指定用户名
+    - 当前私聊加载更早消息
+  - 成功后：
+    - 写入对应私聊消息
+    - 更新该会话 cursor
+    - 若会话不存在则创建
+    - 切换到该私聊并清未读
+  - 失败后：显示私聊历史错误；`401` 时清会话
+
+### 群聊
+
+- `POST /api/v2/groups`
+  - 入口：建群弹窗提交
+  - 请求：`groupName` 和可选 `members[]`
+  - 成功后：
+    - 新群加入 `groups`
+    - 创建群会话
+    - 自动切到该群
+    - 清空建群输入
+    - 显示成功提示
+  - 失败后：弹窗内显示错误
+
+- `GET /api/v2/groups`
+  - 入口：
+    - 登录成功初始化
+    - 启动恢复初始化
+    - 会话列表手动刷新
+  - 成功后：
+    - 更新 `groups`
+    - 把群列表合并进会话列表
+  - 失败后：显示错误；`401` 时清会话
+
+- `GET /api/v2/groups/{groupID}`
+  - 已有 API 封装
+  - 当前 UI 没有单独把它作为独立入口使用
+
+- `GET /api/v2/groups/{groupID}/members`
+- `GET /api/v2/groups/{groupID}/history?limit=50&cursor=...`
+  - 入口：
+    - 打开某个群
+    - 手动刷新当前群
+    - 群历史加载更早消息
+  - 成功后：
+    - 并行更新群消息与成员列表
+    - 更新群会话 `members/memberCount/description`
+    - 更新分页 cursor
+    - 切换到该群并清未读
+  - 失败后：显示错误；`401` 时清会话
+
+- `POST /api/v2/groups/{groupID}/members`
+  - 入口：群面板添加成员
+  - 成功后：
+    - 显示“已添加成员”
+    - 重新加载该群历史和成员
+  - 失败后：显示添加失败
+
+- `DELETE /api/v2/groups/{groupID}/members/{username}`
+  - 入口：群面板移除成员确认
+  - 成功后：
+    - 显示“已移除成员”
+    - 重新加载该群历史和成员
+  - 失败后：显示移除失败
+
+### 文件
+
+- `POST /api/v2/files/upload`
+  - 入口：聊天主视图选择文件后上传
+  - 当前前端支持：
+    - 公共文件上传
+    - 私聊文件上传，带 `receiverUsername`
+  - 当前前端不支持：
+    - 群文件上传
+  - 成功后：
+    - 清掉上传中状态
+    - 显示“文件已上传”
+    - 真实文件消息等待 realtime 回推
+  - 失败后：显示上传错误
+
+- `GET /api/v2/files/{fileId}`
+  - 入口：消息卡片下载按钮
+  - 当前行为：
+    - 浏览器路径：直接使用下载 URL
+    - Tauri 路径：仍主要复用下载 URL，完整保存位置/进度/打开目录还未收口
+
+### 用户资料
+
+- `GET /api/v2/users/{username}/profile`
+  - 入口：身份卡、会话资料入口、消息发送者入口
+  - 成功后：展示昵称、用户名、头像、注册时间、bio、性别；本人额外可见 email
+  - 失败后：资料弹窗内显示加载错误
+
+- `PUT /api/v2/users/{username}/profile`
+  - 入口：本人资料编辑提交
+  - 成功后：
+    - 更新弹窗内资料
+    - 若修改的是自己，立即同步前端 `currentUser.nickname`
+  - 失败后：资料弹窗内显示保存错误
+
+## Realtime 交互清单
+
+### 握手与生命周期
+
+- 握手地址：`GET /api/v2/ws?token=<jwt>`
+- 建立时机：
+  - 登录成功后
+  - 启动恢复 token 成功且 HTTP 初始化完成后
+  - 手动重连
+  - 自动重连
+
+### 前端消费的事件
+
+- `session.ready`
+  - 更新当前用户与“实时连接已就绪”提示
+
+- `presence.online`
+- `presence.offline`
+  - 更新在线用户列表与私聊会话在线状态
+
+- `chat.public.message`
+- `chat.private.message`
+- `chat.group.message`
+  - 写入会话消息列表
+  - 更新最后一条消息和更新时间
+  - 非当前会话时增加未读
+  - 匹配本地 optimistic message 并确认发送
+  - 窗口未聚焦/不可见时触发通知
+
+- `error`
+  - 更新全局错误
+  - 当前会把所有 `sending` 消息批量标记失败
+  - `unauthorized` 时主动清 token 并要求重新登录
+
+### 前端发送的事件
+
+- `chat.public.send`
+- `chat.private.send`
+- `chat.group.send`
+- `session.ping`
+
+### 重连策略
+
+- 浏览器路径：
+  - JS WebSocket client 指数退避自动重连
+  - store 侧目前以 `maxReconnectAttempts=6`、`reconnectBaseDelayMs=900` 调用
+- Tauri 路径：
+  - Rust realtime client 负责连接、心跳、退避重连
+  - 通过 `realtime://event`、`realtime://status`、`realtime://reconnect` 回传给前端
+
+## 桌面能力与本地存储
+
+- 语言/主题：
+  - Tauri：`tauri-plugin-store`
+  - 浏览器 dev：`localStorage`
+- JWT：
+  - Tauri：系统凭据库
+  - 浏览器 dev：`localStorage`
+- 本地消息：
+  - Tauri：SQLite 为主，JSON snapshot 为补充
+  - 浏览器 dev：`localStorage` snapshot fallback
+- 通知：
+  - Tauri：原生通知插件
+  - 浏览器：Notification API
 
 ## 当前设计方案
 
-当前前端采用 `Workbench + 双主题` 方向，并且已经完成一轮视觉降噪、中文模式和主题切换接入。
+当前前端采用 `Workbench + 双主题` 方向，并已经完成一轮视觉降噪、中文模式、主题切换和交互一致性收口。
 
 设计目标：
 
-- 把页面从“联调原型 + 展示式三栏”推进到“长期使用的桌面聊天客户端”
+- 把页面从“联调原型”推进到“可长期维护的桌面聊天客户端”
 - 保留现有协议联调逻辑，不为了视觉改版重做状态流
-- 优先服务消息阅读、会话切换和连接恢复，而不是扩大装饰性视觉元素
+- 优先服务消息阅读、会话切换、连接恢复和错误恢复
 
 当前视觉语言：
 
-- 白天模式使用偏暖的 `Catppuccin Latte` 风格色板，黑夜模式使用 `One Dark` 风格色板
+- 白天模式使用偏暖的 `Catppuccin Latte` 风格色板
+- 黑夜模式使用 `One Dark` 风格色板
 - 默认跟随系统深浅色，也可以手动固定为白天或黑夜
-- 保持工作台式低装饰界面，取消霓虹、网格、扫描线和文字发光
-- 主题内协调色用于背景、面板、消息气泡、选中会话和状态反馈
-- 面板、按钮、消息气泡统一使用低对比边框和 8-14px 圆角
-- 默认中文界面，保留 `中文 / EN` 轻量语言切换
+- 默认中文界面，保留 `中文 / EN` 轻量切换
+- 面板、按钮、消息气泡、callout 使用统一的边框、圆角和状态色
 
 当前布局意图：
 
-- 左栏：身份、登录/注册、连接 telemetry
-- 中栏：前端派生的会话列表和历史手动查询
-- 右栏：当前聊天主视图
-- 顶部：客户端标题和实时连接状态
-
-当前交互意图：
-
-- HTTP 先完成首屏同步
-- WebSocket 再进入真实在线会话
-- 在线用户、presence、实时消息都进入统一前端状态层
-- 消息发送先插入本地 optimistic message，再等待服务端实时回推确认
-- 如果服务端消息事件回传 `requestId`，前端优先用它精确确认发送状态
-- 若没有 `requestId`，前端暂用“同发送者、同内容、近时间回推”兼容确认发送状态
-- 发送超时会标记为失败，失败消息可重试
-- HTTP 或 WebSocket 返回 `unauthorized` 时，前端会主动过期当前会话并要求重新登录
-- 会话切换优先使用本地缓存；显式 `Reload` 才刷新当前会话历史
-- 桌面快捷键：`Ctrl/Cmd+R` 重连，`Ctrl/Cmd+K` 聚焦私聊历史输入，`Esc` 清错误或取消输入焦点
-- 语言选择保存在 `localStorage`，默认 `zh-CN`，固定 UI 文案通过 `frontend/src/i18n.ts` 管理
-- 主题选择保存在 `localStorage`，默认 `system`，解析后的主题写入 `document.documentElement.dataset.theme`
-
-当前设计边界：
-
-- 不引入新的 UI 组件库
-- `zustand` 已作为正式前端状态层接入
-- 不改后端协议
-- 不在文件协议稳定前伪实现文件上传下载
-
-如果后续继续改版，默认应沿着克制、可长期使用的工作台方向演进，而不是回到强装饰的展示页式布局。
+- 顶部：客户端标题、连接状态、移动端侧栏开关、Dev 入口
+- 左栏：身份与偏好、会话列表
+- 主区：当前聊天主视图
+- 页面级：全局反馈区与弹窗层
 
 ## 当前真实状态
 
-当前前端已经跑通的部分：
+当前前端可以稳定依赖的前后端协议：
 
-**聊天协议：**
-- 注册
-- 登录
-- 公共历史拉取
-- 按用户名拉取私聊历史
-- 远程开发下通过 `Vite proxy` 访问后端
-- 登录成功后建立 WebSocket
-- `session.ready`
-- `session.ping` / `session.pong`
-- `presence.online` / `presence.offline`
-- `chat.public.message`
-- `chat.private.message`
-- 公共消息发送 UI
-- 当前私聊视图下的直接消息发送 UI
-- 点击在线用户列表进入私聊历史
-- `zustand` 状态层
-- 前端派生会话列表
-- 未读计数
-- 自动重连与重连提示
-- 发送中 / 失败 / 重试 / 已确认状态
-- 历史分页入口
-- 主要 UI 面板已拆到 `frontend/src/components`
-- 当前会话发送中/失败数量和最后更新时间展示
-- 每个会话滚动位置保留
+- 认证
+- 历史
+- 在线状态
+- WebSocket 会话
+- 公共/私聊/群聊文本消息
+- 文件上传下载
+- 文件消息事件
+- 群聊基本管理
+- 用户资料读取与更新
 
-**桌面能力（2026-05 新增）：**
-- 系统托盘（关闭窗口隐藏到托盘而非退出）
-- 单实例保护（重复启动激活已有窗口）
-- 托盘菜单动作：Show / Reconnect / Quit
-- 窗口状态持久化（位置/大小/最大化重启恢复）
-- 窗口聚焦/隐藏/恢复事件同步到前端状态，用于通知策略
-- 原生 OS 通知（`desktop.ts` 封装，仅非当前会话且窗口未聚焦/不可见时触发，浏览器 Notification API fallback）
-- 语言、主题本地持久化恢复（Tauri store → 浏览器 localStorage fallback）
-- JWT token 安全持久化恢复（系统凭据库：Windows Credential Manager / macOS Keychain / Linux Secret Service）
-- Tauri 启动时会把旧 Tauri store 或旧 localStorage 中的 JWT 迁移到系统凭据库，并删除旧位置的 token
-- 本地聊天记录快照：按用户持久化最近会话与消息，启动时优先恢复本地记录，再用远端公共历史和在线状态覆盖刷新
-- URL/文件打开（plugin-opener）
-- 文件上传当前仍走浏览器 `File` 对象路径；原生文件读取桥接尚未接入
+当前前端不应把下面这些当成稳定基线：
 
-当前前端还没有真正完成的部分：
-
-- 群文件上传（后端上传 API 缺 groupID 参数）
-- 删群（后端未实现 DELETE /api/v2/groups/{groupID}）
-- 已读 / 撤回 / 多端同步（协议未定义）
-
-当前协议边界：
-
-- 可以稳定依赖：认证、历史、在线状态、WebSocket 会话、公共/私聊/群聊文本消息、文件上传下载、文件消息事件
-- 暂不稳定依赖：群文件上传、删群、已读、撤回、多端同步
+- 群文件上传
+- 删群
+- 已读
+- 撤回
+- 多端同步
 
 ## 进一步阅读
 
 - 整体开发结构说明见 [docs/dev-architecture.md](../docs/dev-architecture.md)
 - 协议契约见 [docs/protocol-v2.md](../docs/protocol-v2.md)
+- 当前执行线见 [TODO.md](./TODO.md)
