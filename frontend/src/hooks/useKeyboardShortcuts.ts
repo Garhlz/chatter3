@@ -15,7 +15,7 @@ function isEditableTarget(target: EventTarget | null) {
 
 export function useKeyboardShortcuts() {
   const reconnect = useChatStore((state) => state.reconnect);
-  const clearError = useChatStore((state) => state.clearError);
+  const clearFeedback = useChatStore((state) => state.clearFeedback);
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -44,7 +44,7 @@ export function useKeyboardShortcuts() {
       }
 
       if (event.key === "Escape") {
-        clearError();
+        clearFeedback();
         if (isEditableTarget(event.target)) {
           (event.target as HTMLElement).blur();
         }
@@ -53,5 +53,5 @@ export function useKeyboardShortcuts() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [clearError, reconnect]);
+  }, [clearFeedback, reconnect]);
 }

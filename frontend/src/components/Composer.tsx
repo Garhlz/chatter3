@@ -1,3 +1,4 @@
+import { cli } from "./utils";
 import { t } from "../i18n";
 import { useChatStore } from "../store/chatStore";
 
@@ -33,17 +34,18 @@ export function Composer() {
   return (
     <div className="composer">
       <div className="composer-field">
-        <input
+        <textarea
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === "Enter" && !event.shiftKey) {
               event.preventDefault();
-              sendMessage();
+              cli(() => sendMessage())();
             }
           }}
-          disabled={!token || status !== "connected"}
+          disabled={!token}
           placeholder={composerPlaceholder}
+          rows={3}
         />
         <small>{composerHint}</small>
       </div>
@@ -51,7 +53,7 @@ export function Composer() {
         type="button"
         className="primary-button"
         disabled={!draft.trim() || !token || status !== "connected"}
-        onClick={sendMessage}
+        onClick={cli(() => sendMessage())}
       >
         {t(language, "composer.send")}
       </button>

@@ -111,6 +111,8 @@ type ChatState = {
   retryMessage: (localId: string) => Promise<void>;
   disconnect: () => void;
   clearError: () => void;
+  clearNotice: () => void;
+  clearFeedback: () => void;
   createGroup: () => Promise<void>;
   loadGroups: () => Promise<void>;
   loadGroupHistory: (groupID: number) => Promise<void>;
@@ -945,16 +947,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const content = state.draft.trim();
     if (!content) return;
     if (!state.token || state.status !== "connected" || !state.currentUser) {
-      set({ error: "Connect the realtime session before sending messages." });
+      set({ error: t(state.language, "error.connectBeforeSend") });
       return;
     }
     const view = activeView(state.activeConversationId);
     if (view.scope === "private" && !view.peer) {
-      set({ error: "Choose a private conversation before sending a direct message." });
+      set({ error: t(state.language, "error.choosePrivate") });
       return;
     }
     if (view.scope === "group" && !view.groupID) {
-      set({ error: "Select a group before sending a message." });
+      set({ error: t(state.language, "error.selectGroup") });
       return;
     }
 
@@ -984,12 +986,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const currentDraft = current.draft.trim();
       if (currentDraft !== content) return current;
       return {
-        error: sent ? "" : "Realtime socket is not ready.",
+        error: sent ? "" : t(current.language, "error.socketNotReady"),
         draft: sent ? "" : current.draft,
         messagesByConversation: {
           ...current.messagesByConversation,
           [cid]: mergeMessages(current.messagesByConversation[cid] ?? [], [
-            { ...optimistic, deliveryStatus: sent ? "sending" : "failed", error: sent ? undefined : "Socket is not open." },
+            { ...optimistic, deliveryStatus: sent ? "sending" : "failed", error: sent ? undefined : t(current.language, "error.socketNotOpen") },
           ]),
         },
         conversations: {
@@ -1106,7 +1108,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       });
     } catch (err) {
       if (isUnauthorizedError(err)) { expireSession(); return; }
-      set({ error: err instanceof Error ? err.message : "Failed to load groups" });
+      set({ error: err instanceof Error ? err.message : t(get().language, "error.loadGroups") });
     }
   },
   loadGroupHistory: async (groupID) => {
@@ -1149,7 +1151,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
   addGroupMembers: async (groupID, usernames) => {
     const { token } = get();
-    if (!token) { set({ error: "Log in before managing group members." }); return; }
+    if (!token) { set({ error: t(get().language, "error.loginBeforeManageGroup") }); return; }
     try {
       set({ error: "" });
       await api.addGroupMembers(token, groupID, { usernames });
@@ -1162,7 +1164,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
   removeGroupMember: async (groupID, username) => {
     const { token } = get();
-    if (!token) { set({ error: "Log in before managing group members." }); return; }
+    if (!token) { set({ error: t(get().language, "error.loginBeforeManageGroup") }); return; }
     try {
       set({ error: "" });
       await api.removeGroupMember(token, groupID, username);
@@ -1177,19 +1179,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
   // ── File ──
   uploadFile: async (file, receiverUsername) => {
     const { token } = get();
-    if (!token) { set({ error: "Log in before uploading files." }); return; }
+    if (!token) { set({ error: t(get().language, "error.loginBeforeUpload") }); return; }
     try {
       set((s) => ({ error: "", uploadingCount: s.uploadingCount + 1, lastSelectedFile: file.name }));
       await api.uploadFile(token, file, receiverUsername);
       set((s) => ({
         uploadingCount: s.uploadingCount - 1,
         lastSelectedFile: "",
-        notice: `File "${file.name}" uploaded.`,
+        notice: t(s.language, "notice.fileUploaded", { name: file.name }),
       }));
     } catch (err) {
       if (isUnauthorizedError(err)) { expireSession(); return; }
       set((s) => ({
-        error: err instanceof Error ? err.message : "Failed to upload file",
+        error: err instanceof Error ? err.message : t(s.language, "error.uploadFile"),
         uploadingCount: s.uploadingCount - 1,
       }));
     }
@@ -1279,6 +1281,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   clearError: () => set({ error: "", authExpired: false }),
+  clearNotice: () => set({ notice: "" }),
+  clearFeedback: () => set({ error: "", authExpired: false, notice: "" }),
 }));
 
 useChatStore.subscribe((state, previous) => {
