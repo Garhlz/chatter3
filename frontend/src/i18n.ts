@@ -4,6 +4,11 @@ type TranslationKey =
   | "app.eyebrow"
   | "app.title"
   | "app.currentUser"
+  | "app.openSidebar"
+  | "app.closeSidebar"
+  | "app.toggleDev"
+  | "dev.label"
+  | "dev.lookup"
   | "auth.access"
   | "auth.login"
   | "auth.username"
@@ -15,6 +20,8 @@ type TranslationKey =
   | "auth.nickname"
   | "auth.newPassword"
   | "auth.register"
+  | "auth.loggingIn"
+  | "auth.registering"
   | "auth.nicknamePlaceholder"
   | "identity.title"
   | "identity.sessionActive"
@@ -24,6 +31,10 @@ type TranslationKey =
   | "identity.dismiss"
   | "identity.language"
   | "identity.theme"
+  | "feedback.notice"
+  | "feedback.error"
+  | "feedback.dismiss"
+  | "feedback.sessionExpired"
   | "theme.system"
   | "theme.latte"
   | "theme.oneDark"
@@ -89,6 +100,9 @@ type TranslationKey =
   | "group.noMembersHint"
   | "group.addPlaceholder"
   | "group.addMembers"
+  | "group.confirmRemove"
+  | "group.confirmRemoveHint"
+  | "group.cancelRemove"
   | "status.idle"
   | "status.connecting"
   | "status.connected"
@@ -118,6 +132,7 @@ type TranslationKey =
   | "error.loadPrivateHistory"
   | "error.loadOlder"
   | "error.refreshUsers"
+  | "error.loadGroups"
   | "error.connectBeforeSend"
   | "error.choosePrivate"
   | "error.selectGroup"
@@ -131,15 +146,55 @@ type TranslationKey =
   | "error.loadGroupHistory"
   | "error.addMembers"
   | "error.removeMember"
+  | "error.loginBeforeManageGroup"
   | "error.loginBeforeUpload"
   | "error.uploadFile"
-  | "error.restoreSession";
+  | "error.restoreSession"
+  | "auth.usernamePlaceholder"
+  | "auth.passwordPlaceholder"
+  | "auth.dismiss"
+  | "conv.search"
+  | "conv.createGroup"
+  | "conv.refresh"
+  | "conv.viewProfile"
+  | "conv.noResults"
+  | "conv.noResultsHint"
+  | "modal.groupTitle"
+  | "modal.createGroup"
+  | "modal.groupName"
+  | "modal.groupNameHint"
+  | "modal.groupMembers"
+  | "modal.groupMembersHint"
+  | "modal.creatingGroup"
+  | "profile.label"
+  | "profile.loading"
+  | "profile.nickname"
+  | "profile.bio"
+  | "profile.email"
+  | "profile.gender"
+  | "profile.genderUnspecified"
+  | "profile.genderMale"
+  | "profile.genderFemale"
+  | "profile.genderOther"
+  | "profile.save"
+  | "profile.saving"
+  | "profile.cancel"
+  | "profile.joined"
+  | "profile.edit"
+  | "profile.loadError"
+  | "profile.saveError"
+  | "profile.notFound";
 
 const dictionaries: Record<Language, Record<TranslationKey, string>> = {
   "zh-CN": {
     "app.eyebrow": "实时聊天客户端",
     "app.title": "Chatter3",
     "app.currentUser": "当前用户：{name}",
+    "app.openSidebar": "打开会话侧栏",
+    "app.closeSidebar": "关闭会话侧栏",
+    "app.toggleDev": "切换开发面板",
+    "dev.label": "开发",
+    "dev.lookup": "手动查询",
     "auth.access": "登录",
     "auth.login": "账号登录",
     "auth.username": "用户名",
@@ -150,7 +205,11 @@ const dictionaries: Record<Language, Record<TranslationKey, string>> = {
     "auth.newUsername": "新用户名",
     "auth.nickname": "昵称",
     "auth.newPassword": "新密码",
+    "auth.usernamePlaceholder": "输入用户名",
+    "auth.passwordPlaceholder": "输入密码",
     "auth.register": "注册账号",
+    "auth.loggingIn": "登录中...",
+    "auth.registering": "注册中...",
     "auth.nicknamePlaceholder": "显示名称",
     "identity.title": "账号",
     "identity.sessionActive": "会话已保存",
@@ -160,6 +219,10 @@ const dictionaries: Record<Language, Record<TranslationKey, string>> = {
     "identity.dismiss": "关闭",
     "identity.language": "语言",
     "identity.theme": "主题",
+    "feedback.notice": "提示",
+    "feedback.error": "错误",
+    "feedback.dismiss": "关闭",
+    "feedback.sessionExpired": "会话已过期",
     "theme.system": "跟随系统",
     "theme.latte": "白天",
     "theme.oneDark": "黑夜",
@@ -225,6 +288,9 @@ const dictionaries: Record<Language, Record<TranslationKey, string>> = {
     "group.noMembersHint": "刷新群组历史后可查看成员。",
     "group.addPlaceholder": "要添加的用户名，用逗号分隔",
     "group.addMembers": "添加成员",
+    "group.confirmRemove": "确认移除成员",
+    "group.confirmRemoveHint": "将 {name} 移出当前群聊。",
+    "group.cancelRemove": "取消",
     "status.idle": "未连接",
     "status.connecting": "连接中",
     "status.connected": "已连接",
@@ -254,6 +320,7 @@ const dictionaries: Record<Language, Record<TranslationKey, string>> = {
     "error.loadPrivateHistory": "加载私聊历史失败",
     "error.loadOlder": "加载更早消息失败",
     "error.refreshUsers": "刷新在线用户失败",
+    "error.loadGroups": "加载群组失败",
     "error.connectBeforeSend": "请先建立实时连接再发送消息。",
     "error.choosePrivate": "请选择私聊会话后再发送消息。",
     "error.selectGroup": "请选择群组后再发送消息。",
@@ -267,14 +334,52 @@ const dictionaries: Record<Language, Record<TranslationKey, string>> = {
     "error.loadGroupHistory": "加载群组历史失败",
     "error.addMembers": "添加成员失败",
     "error.removeMember": "移除成员失败",
+    "error.loginBeforeManageGroup": "请先登录再管理群成员。",
     "error.loginBeforeUpload": "请先登录再上传文件。",
     "error.uploadFile": "上传文件失败",
+    "auth.dismiss": "关闭",
+    "conv.search": "搜索会话...",
+    "conv.createGroup": "创建群聊",
+    "conv.refresh": "刷新",
+    "conv.viewProfile": "查看资料",
+    "conv.noResults": "无匹配会话",
+    "conv.noResultsHint": "尝试调整搜索内容",
+    "modal.groupTitle": "创建群聊",
+    "modal.createGroup": "创建群",
+    "modal.groupName": "群名称",
+    "modal.groupNameHint": "输入群聊名称",
+    "modal.groupMembers": "成员",
+    "modal.groupMembersHint": "邀请成员（逗号分隔）",
+    "modal.creatingGroup": "创建中...",
+    "profile.label": "用户信息",
+    "profile.loading": "加载中...",
+    "profile.nickname": "昵称",
+    "profile.bio": "自我介绍",
+    "profile.email": "邮箱",
+    "profile.gender": "性别",
+    "profile.genderUnspecified": "未设置",
+    "profile.genderMale": "男",
+    "profile.genderFemale": "女",
+    "profile.genderOther": "其他",
+    "profile.save": "保存",
+    "profile.saving": "保存中...",
+    "profile.cancel": "取消",
+    "profile.joined": "注册于",
+    "profile.edit": "编辑资料",
+    "profile.loadError": "加载资料失败",
+    "profile.saveError": "保存资料失败",
+    "profile.notFound": "用户不存在",
     "error.restoreSession": "恢复保存会话失败",
   },
   "en-US": {
     "app.eyebrow": "Realtime chat client",
     "app.title": "Chatter3",
     "app.currentUser": "Current user: {name}",
+    "app.openSidebar": "Open conversations",
+    "app.closeSidebar": "Close conversations",
+    "app.toggleDev": "Toggle developer panel",
+    "dev.label": "Developer",
+    "dev.lookup": "Manual lookup",
     "auth.access": "Access",
     "auth.login": "Login",
     "auth.username": "Username",
@@ -285,7 +390,11 @@ const dictionaries: Record<Language, Record<TranslationKey, string>> = {
     "auth.newUsername": "New username",
     "auth.nickname": "Nickname",
     "auth.newPassword": "New password",
+    "auth.usernamePlaceholder": "Enter username",
+    "auth.passwordPlaceholder": "Enter password",
     "auth.register": "Register",
+    "auth.loggingIn": "Signing in...",
+    "auth.registering": "Creating account...",
     "auth.nicknamePlaceholder": "Friendly name",
     "identity.title": "Account",
     "identity.sessionActive": "Session saved",
@@ -295,6 +404,10 @@ const dictionaries: Record<Language, Record<TranslationKey, string>> = {
     "identity.dismiss": "Dismiss",
     "identity.language": "Language",
     "identity.theme": "Theme",
+    "feedback.notice": "Notice",
+    "feedback.error": "Error",
+    "feedback.dismiss": "Dismiss",
+    "feedback.sessionExpired": "Session expired",
     "theme.system": "System",
     "theme.latte": "Day",
     "theme.oneDark": "Night",
@@ -360,6 +473,9 @@ const dictionaries: Record<Language, Record<TranslationKey, string>> = {
     "group.noMembersHint": "Reload group history to see members.",
     "group.addPlaceholder": "Usernames to add, comma-separated",
     "group.addMembers": "Add members",
+    "group.confirmRemove": "Confirm member removal",
+    "group.confirmRemoveHint": "Remove {name} from this group.",
+    "group.cancelRemove": "Cancel",
     "status.idle": "Idle",
     "status.connecting": "Connecting",
     "status.connected": "Connected",
@@ -389,6 +505,7 @@ const dictionaries: Record<Language, Record<TranslationKey, string>> = {
     "error.loadPrivateHistory": "Failed to load private history",
     "error.loadOlder": "Failed to load older messages",
     "error.refreshUsers": "Failed to refresh online users",
+    "error.loadGroups": "Failed to load groups",
     "error.connectBeforeSend": "Connect the realtime session before sending messages.",
     "error.choosePrivate": "Choose a private conversation before sending a direct message.",
     "error.selectGroup": "Select a group before sending a message.",
@@ -402,8 +519,41 @@ const dictionaries: Record<Language, Record<TranslationKey, string>> = {
     "error.loadGroupHistory": "Failed to load group history",
     "error.addMembers": "Failed to add members",
     "error.removeMember": "Failed to remove member",
+    "error.loginBeforeManageGroup": "Log in before managing group members.",
     "error.loginBeforeUpload": "Log in before uploading files.",
     "error.uploadFile": "Failed to upload file",
+    "auth.dismiss": "Dismiss",
+    "conv.search": "Search conversations...",
+    "conv.createGroup": "Create group",
+    "conv.refresh": "Refresh",
+    "conv.viewProfile": "View profile",
+    "conv.noResults": "No matching conversations",
+    "conv.noResultsHint": "Try a different search term",
+    "modal.groupTitle": "Create group",
+    "modal.createGroup": "Create group",
+    "modal.groupName": "Group name",
+    "modal.groupNameHint": "Enter a group name",
+    "modal.groupMembers": "Members",
+    "modal.groupMembersHint": "Invite members, comma-separated",
+    "modal.creatingGroup": "Creating...",
+    "profile.label": "Profile",
+    "profile.loading": "Loading...",
+    "profile.nickname": "Nickname",
+    "profile.bio": "Bio",
+    "profile.email": "Email",
+    "profile.gender": "Gender",
+    "profile.genderUnspecified": "Unspecified",
+    "profile.genderMale": "Male",
+    "profile.genderFemale": "Female",
+    "profile.genderOther": "Other",
+    "profile.save": "Save",
+    "profile.saving": "Saving...",
+    "profile.cancel": "Cancel",
+    "profile.joined": "Joined",
+    "profile.edit": "Edit profile",
+    "profile.loadError": "Failed to load profile",
+    "profile.saveError": "Failed to save profile",
+    "profile.notFound": "User not found",
     "error.restoreSession": "Failed to restore saved session",
   },
 };

@@ -3,6 +3,7 @@ import { useShallow } from "zustand/shallow";
 import { httpBaseURL } from "../config";
 import { t } from "../i18n";
 import { formatMessageTime } from "./format";
+import { cli } from "./utils";
 import {
   selectActiveMessages,
   useChatStore,
@@ -14,7 +15,7 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export function MessageList() {
+export function MessageList({ onProfileOpen }: { onProfileOpen: (username: string) => void }) {
   const language = useChatStore((state) => state.language);
   const currentUser = useChatStore((state) => state.currentUser);
   const activeConversationId = useChatStore((state) => state.activeConversationId);
@@ -66,13 +67,26 @@ export function MessageList() {
               }`}
             >
               <div className="message-meta">
-                <strong>{message.sender.nickname}</strong>
+                <button
+                  type="button"
+                  className="message-sender-clickable"
+                  onClick={() => onProfileOpen(message.sender.username)}
+                >
+                  {message.sender.nickname}
+                </button>
                 <span>{formatMessageTime(message.timestamp)}</span>
               </div>
 
               {isFile ? (
                 <div className="file-card">
                   <div className="file-card-info">
+                      {message.file!.mimeType?.startsWith("image/") && (
+                        <img
+                          src={httpBaseURL + message.file!.downloadURL}
+                          alt={message.file!.fileName}
+                          className="file-preview-img"
+                        />
+                      )}
                     <span className="file-card-name">
                       {message.file!.fileName}
                     </span>
@@ -84,12 +98,11 @@ export function MessageList() {
                     className="file-card-download primary-button compact-button"
                     href={httpBaseURL + message.file!.downloadURL}
                     download={message.file!.fileName}
-                    style={{ display: "inline-flex", textDecoration: "none" }}
                   >
                     {t(language, "message.download")}
                   </a>
                   {message.content ? (
-                    <p style={{ marginTop: 6 }}>{message.content}</p>
+                    <p className="file-card-caption">{message.content}</p>
                   ) : null}
                 </div>
               ) : (
@@ -107,7 +120,7 @@ export function MessageList() {
                   {message.deliveryStatus === "failed" ? (
                     <button
                       type="button"
-                      onClick={() => retryMessage(message.localId)}
+                      onClick={cli(() => retryMessage(message.localId))}
                     >
                       {t(language, "message.retry")}
                     </button>

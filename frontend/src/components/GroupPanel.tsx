@@ -12,6 +12,8 @@ export function GroupPanel() {
   const addGroupMembers = useChatStore((state) => state.addGroupMembers);
   const removeGroupMember = useChatStore((state) => state.removeGroupMember);
   const [addInput, setAddInput] = useState("");
+  const [memberLoading, setMemberLoading] = useState(false);
+  const [pendingRemoval, setPendingRemoval] = useState<string | null>(null);
 
   if (!activeConversation || activeConversation.scope !== "group") {
     return null;
@@ -33,13 +35,20 @@ export function GroupPanel() {
       .map((s) => s.trim())
       .filter(Boolean);
     if (usernames.length === 0 || !groupID) return;
-    void addGroupMembers(groupID, usernames);
+    setMemberLoading(true);
+    addGroupMembers(groupID!, usernames).finally(() => setMemberLoading(false));
     setAddInput("");
   }
 
   function handleRemoveMember(username: string) {
     if (!groupID) return;
-    void removeGroupMember(groupID, username);
+    setMemberLoading(true);
+    removeGroupMember(groupID, username)
+      .finally(() => {
+        setMemberLoading(false);
+        setPendingRemoval(null);
+      })
+      .catch(() => {});
   }
 
   return (
@@ -76,8 +85,7 @@ export function GroupPanel() {
               <button
                 type="button"
                 className="secondary-button compact-button"
-                onClick={() => handleRemoveMember(member.user.username)}
-                style={{ minHeight: 28, fontSize: "0.7rem" }}
+                onClick={() => setPendingRemoval(member.user.username)}
               >
                 {t(language, "group.remove")}
               </button>
@@ -94,24 +102,51 @@ export function GroupPanel() {
       </div>
 
       {isCurrentUserAdmin && (
-        <div className="form-block" style={{ gap: 6 }}>
+        <div className="form-block group-member-form">
           <input
             value={addInput}
             onChange={(e) => setAddInput(e.target.value)}
             disabled={!token}
             placeholder={t(language, "group.addPlaceholder")}
-            style={{ minHeight: 36, fontSize: "0.82rem" }}
+            className="group-member-input"
           />
           <button
             type="button"
             className="secondary-button compact-button"
-            disabled={!addInput.trim() || !token}
-            onClick={handleAddMembers}
+            disabled={!addInput.trim() || !token || memberLoading}
+            onClick={() => handleAddMembers()}
           >
             {t(language, "group.addMembers")}
           </button>
         </div>
       )}
+
+      {pendingRemoval ? (
+        <div className="callout error group-confirm" role="alertdialog">
+          <strong>{t(language, "group.confirmRemove")}</strong>
+          <span>
+            {t(language, "group.confirmRemoveHint", { name: pendingRemoval })}
+          </span>
+          <div className="inline-actions">
+            <button
+              type="button"
+              className="secondary-button compact-button"
+              onClick={() => setPendingRemoval(null)}
+              disabled={memberLoading}
+            >
+              {t(language, "group.cancelRemove")}
+            </button>
+            <button
+              type="button"
+              className="primary-button compact-button danger-button"
+              onClick={() => handleRemoveMember(pendingRemoval)}
+              disabled={memberLoading}
+            >
+              {t(language, "group.remove")}
+            </button>
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }

@@ -10,8 +10,9 @@ import {
   selectActiveStats,
   useChatStore,
 } from "../store/chatStore";
+import { cli } from "./utils";
 
-export function ChatPanel() {
+export function ChatPanel({ onProfileOpen }: { onProfileOpen: (username: string) => void }) {
   const language = useChatStore((state) => state.language);
   const token = useChatStore((state) => state.token);
   const status = useChatStore((state) => state.status);
@@ -42,7 +43,7 @@ export function ChatPanel() {
       activeConversation.scope === "private"
         ? activeConversation.peerUsername
         : undefined;
-    void uploadFile(file, receiver);
+    cli(() => uploadFile(file, receiver))();
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
@@ -108,7 +109,7 @@ export function ChatPanel() {
               type="button"
               className="secondary-button compact-button"
               disabled={historyLoading}
-              onClick={() => void loadOlderHistory()}
+              onClick={cli(() => loadOlderHistory())}
             >
               {historyLoading ? t(language, "chat.loading") : t(language, "chat.loadOlder")}
             </button>
@@ -117,7 +118,7 @@ export function ChatPanel() {
             type="button"
             className="secondary-button compact-button"
             disabled={!token || historyLoading}
-            onClick={() => void reloadActiveHistory()}
+            onClick={cli(() => reloadActiveHistory())}
           >
             {t(language, "chat.reload")}
           </button>
@@ -135,7 +136,7 @@ export function ChatPanel() {
         </div>
       </header>
 
-      <MessageList />
+      <MessageList onProfileOpen={onProfileOpen} />
 
       <GroupPanel />
 

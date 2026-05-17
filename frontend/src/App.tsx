@@ -1,10 +1,12 @@
-import { useEffect } from "react";
-import { ArchiveTools } from "./components/ArchiveTools";
+import { useEffect, useState } from "react";
 import { AuthPanel } from "./components/AuthPanel";
 import { ChatPanel } from "./components/ChatPanel";
 import { ConversationList } from "./components/ConversationList";
+import { CreateGroupModal } from "./components/CreateGroupModal";
+import { DevPanel } from "./components/DevPanel";
+import { GlobalFeedback } from "./components/GlobalFeedback";
 import { IdentityPanel } from "./components/IdentityPanel";
-import { TelemetryPanel } from "./components/TelemetryPanel";
+import { UserProfileModal } from "./components/UserProfileModal";
 import {
   listenDesktopReconnect,
   listenDesktopWindowState,
@@ -29,6 +31,11 @@ export function App() {
   );
   const disconnect = useChatStore((state) => state.disconnect);
   const bootstrapSession = useChatStore((state) => state.bootstrapSession);
+
+  const [showDev, setShowDev] = useState(false);
+  const [showCreateGroup, setShowCreateGroup] = useState(false);
+  const [showSidebar, setShowSidebar] = useState(false);
+  const [profileUsername, setProfileUsername] = useState<string | null>(null);
 
   useKeyboardShortcuts();
 
@@ -99,29 +106,76 @@ export function App() {
           <h1>{t(language, "app.title")}</h1>
         </div>
         <div className="topbar-status">
+          <button
+            type="button"
+            className="secondary-button compact-button mobile-sidebar-toggle"
+            onClick={() => setShowSidebar((value) => !value)}
+            aria-label={
+              showSidebar
+                ? t(language, "app.closeSidebar")
+                : t(language, "app.openSidebar")
+            }
+            title={
+              showSidebar
+                ? t(language, "app.closeSidebar")
+                : t(language, "app.openSidebar")
+            }
+          >
+            {showSidebar ? "×" : "☰"}
+          </button>
           <span className={`status-dot status-${status}`} />
           <div>
             <strong>{statusLabel(language, status)}</strong>
             <small>{t(language, "app.currentUser", { name: currentUser.nickname })}</small>
           </div>
+          <button
+            type="button"
+            className="secondary-button compact-button topbar-dev-toggle"
+            onClick={() => setShowDev(!showDev)}
+            aria-label={t(language, "app.toggleDev")}
+            title={t(language, "app.toggleDev")}
+          >
+            {showDev ? "×" : "Dev"}
+          </button>
         </div>
       </header>
 
-      <main className="workspace">
-        <aside className="control-rail">
-          <IdentityPanel />
-          <TelemetryPanel />
+      <GlobalFeedback />
+
+      <main className="workspace workspace-two-col">
+        <aside className={`sidebar ${showSidebar ? "show" : ""}`}>
+          <IdentityPanel onProfileClick={() => setProfileUsername(currentUser.username)} />
+          <ConversationList
+            onProfileOpen={(username) => setProfileUsername(username)}
+            onCreateGroup={() => setShowCreateGroup(true)}
+            onConversationOpen={() => setShowSidebar(false)}
+          />
         </aside>
 
-        <aside className="conversation-rail">
-          <ConversationList />
-          <ArchiveTools />
-        </aside>
+        {showSidebar ? (
+          <button
+            type="button"
+            className="sidebar-backdrop"
+            onClick={() => setShowSidebar(false)}
+            aria-label={t(language, "app.closeSidebar")}
+          />
+        ) : null}
 
         <section className="stage">
-          <ChatPanel />
+          <ChatPanel onProfileOpen={(username) => setProfileUsername(username)} />
         </section>
       </main>
+
+      {showDev && <DevPanel onClose={() => setShowDev(false)} />}
+      {showCreateGroup && (
+        <CreateGroupModal onClose={() => setShowCreateGroup(false)} />
+      )}
+      {profileUsername && (
+        <UserProfileModal
+          username={profileUsername}
+          onClose={() => setProfileUsername(null)}
+        />
+      )}
     </div>
   );
 }
