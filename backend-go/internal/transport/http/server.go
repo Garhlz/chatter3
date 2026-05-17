@@ -79,7 +79,7 @@ func NewServer(
 	userSvc := appsvc.NewUserService(queries, jwtSvc, sessions)
 	msgSvc := appsvc.NewMessageService(queries, sessions)
 	fileSvc := appsvc.NewFileService(pool, queries, sessions, cfg.UploadDir, cfg.MaxFileSize)
-	groupSvc := appsvc.NewGroupService(queries, sessions)
+	groupSvc := appsvc.NewGroupService(pool, queries, sessions)
 
 	s := &Server{
 		cfg:      cfg,
@@ -404,10 +404,17 @@ func (s *Server) handleV2WebSocket(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "token is invalid or expired")
 		return
 	}
-	identity, err := s.userSvc.GetIdentity(r.Context(), claims.UserID)
-	if err != nil {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "token is invalid or expired")
-		return
+	identity := &protocolv2.User{
+		UserID:   claims.UserID,
+		Username: claims.Username,
+		Nickname: claims.Nickname,
+	}
+	if s.userSvc != nil {
+		identity, err = s.userSvc.GetIdentity(r.Context(), claims.UserID)
+		if err != nil {
+			writeError(w, http.StatusUnauthorized, "unauthorized", "token is invalid or expired")
+			return
+		}
 	}
 
 	ws, err := acceptWebSocket(w, r)
@@ -739,15 +746,20 @@ func (s *Server) handleV2ListGroups(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleV2GetGroup(w http.ResponseWriter, r *http.Request) {
+	claims := claimsFrom(r)
 	groupID, err := strconv.ParseInt(r.PathValue("groupID"), 10, 64)
 	if err != nil || groupID <= 0 {
 		writeError(w, http.StatusBadRequest, "bad_request", "invalid group id")
 		return
 	}
 
-	group, err := s.groupSvc.GetGroupByID(r.Context(), groupID)
+	group, err := s.groupSvc.GetGroupByIDForUser(r.Context(), claims.UserID, groupID)
 	if errors.Is(err, repository.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "not_found", "group not found")
+		return
+	}
+	if errors.Is(err, appsvc.ErrNotGroupMember) {
+		writeError(w, http.StatusForbidden, "forbidden", err.Error())
 		return
 	}
 	if err != nil {
@@ -760,15 +772,20 @@ func (s *Server) handleV2GetGroup(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleV2GroupMembers(w http.ResponseWriter, r *http.Request) {
+	claims := claimsFrom(r)
 	groupID, err := strconv.ParseInt(r.PathValue("groupID"), 10, 64)
 	if err != nil || groupID <= 0 {
 		writeError(w, http.StatusBadRequest, "bad_request", "invalid group id")
 		return
 	}
 
-	members, err := s.groupSvc.GetGroupMembers(r.Context(), groupID)
+	members, err := s.groupSvc.GetGroupMembersForUser(r.Context(), claims.UserID, groupID)
 	if errors.Is(err, repository.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "not_found", "group not found")
+		return
+	}
+	if errors.Is(err, appsvc.ErrNotGroupMember) {
+		writeError(w, http.StatusForbidden, "forbidden", err.Error())
 		return
 	}
 	if err != nil {

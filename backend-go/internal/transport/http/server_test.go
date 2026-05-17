@@ -610,6 +610,24 @@ func TestHandleV2GroupHTTPErrorsIntegration(t *testing.T) {
 		t.Fatalf("expected 403 for non-member group history, got %d body=%s", historyRec.Code, historyRec.Body.String())
 	}
 
+	getGroupReq := httptest.NewRequest(http.MethodGet, "/api/v2/groups/"+strconv.FormatInt(groupID, 10), nil)
+	getGroupReq.SetPathValue("groupID", strconv.FormatInt(groupID, 10))
+	getGroupReq.Header.Set("Authorization", "Bearer "+carolToken)
+	getGroupRec := httptest.NewRecorder()
+	server.auth(server.handleV2GetGroup)(getGroupRec, getGroupReq)
+	if getGroupRec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for non-member get group, got %d body=%s", getGroupRec.Code, getGroupRec.Body.String())
+	}
+
+	getMembersReq := httptest.NewRequest(http.MethodGet, "/api/v2/groups/"+strconv.FormatInt(groupID, 10)+"/members", nil)
+	getMembersReq.SetPathValue("groupID", strconv.FormatInt(groupID, 10))
+	getMembersReq.Header.Set("Authorization", "Bearer "+carolToken)
+	getMembersRec := httptest.NewRecorder()
+	server.auth(server.handleV2GroupMembers)(getMembersRec, getMembersReq)
+	if getMembersRec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for non-member get members, got %d body=%s", getMembersRec.Code, getMembersRec.Body.String())
+	}
+
 	addReq = httptest.NewRequest(http.MethodPost, "/api/v2/groups/"+strconv.FormatInt(groupID, 10)+"/members", strings.NewReader(`{"usernames":["ght_carol_`+suffix+`"]}`))
 	addReq.SetPathValue("groupID", strconv.FormatInt(groupID, 10))
 	addReq.Header.Set("Authorization", "Bearer "+bobToken)
@@ -642,7 +660,7 @@ func newGroupIntegrationServer(pool *pgxpool.Pool) *Server {
 		sessions: sessions,
 		jwtSvc:   jwtSvc,
 		msgSvc:   appsvc.NewMessageService(queries, sessions),
-		groupSvc: appsvc.NewGroupService(queries, sessions),
+		groupSvc: appsvc.NewGroupService(pool, queries, sessions),
 	}
 }
 
