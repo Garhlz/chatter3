@@ -73,6 +73,22 @@ async fn do_post<T: for<'de> Deserialize<'de>, B: Serialize>(c: &Client, url: &s
     Ok(data.data)
 }
 
+async fn do_put<T: for<'de> Deserialize<'de>, B: Serialize>(c: &Client, url: &str, body: &B, token: Option<&str>) -> Result<T, String> {
+    let mut req = c.put(url).json(body);
+    if let Some(t) = token { req = req.bearer_auth(t); }
+    let resp = req.send().await.map_err(|e| format!("request: {e}"))?;
+    if !resp.status().is_success() {
+        let status = resp.status().as_u16();
+        let body_text = resp.text().await.unwrap_or_default();
+        return Err(format!("HTTP {status}: {body_text}"));
+    }
+    if resp.status().as_u16() == 204 {
+        return serde_json::from_str("null").map_err(|e| format!("json: {e}"));
+    }
+    let data: ApiEnvelope<T> = resp.json().await.map_err(|e| format!("json: {e}"))?;
+    Ok(data.data)
+}
+
 async fn do_delete(c: &Client, url: &str, token: &str) -> Result<(), String> {
     let resp = c.delete(url).bearer_auth(token).send().await.map_err(|e| format!("request: {e}"))?;
     if !resp.status().is_success() {
@@ -204,6 +220,44 @@ pub async fn api_create_group(http: tauri::State<'_, Mutex<HttpClient>>, token: 
         (h.client.clone(), h.base_url.clone())
     };
     do_post(&client, &format!("{base_url}/api/v2/groups"), &payload, Some(&token)).await
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct UserProfileResponse {
+    pub user: User,
+    pub bio: String,
+    pub gender: i16,
+    #[serde(rename = "createdAt")]
+    pub created_at: String,
+    pub email: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct UpdateProfileRequest {
+    pub nickname: Option<String>,
+    pub bio: Option<String>,
+    pub email: Option<String>,
+    pub gender: Option<i16>,
+}
+
+#[tauri::command]
+pub async fn api_get_user_profile(http: tauri::State<'_, Mutex<HttpClient>>, token: String, username: String) -> Result<UserProfileResponse, String> {
+    let (client, base_url) = {
+        let h = http.lock().map_err(|e| format!("lock: {e}"))?;
+        (h.client.clone(), h.base_url.clone())
+    };
+    let encoded = encode_path_segment(&username);
+    do_get(&client, &format!("{base_url}/api/v2/users/{encoded}/profile"), Some(&token)).await
+}
+
+#[tauri::command]
+pub async fn api_update_user_profile(http: tauri::State<'_, Mutex<HttpClient>>, token: String, username: String, payload: UpdateProfileRequest) -> Result<UserProfileResponse, String> {
+    let (client, base_url) = {
+        let h = http.lock().map_err(|e| format!("lock: {e}"))?;
+        (h.client.clone(), h.base_url.clone())
+    };
+    let encoded = encode_path_segment(&username);
+    do_put(&client, &format!("{base_url}/api/v2/users/{encoded}/profile"), &payload, Some(&token)).await
 }
 
 #[tauri::command]

@@ -7,6 +7,8 @@ package sqlcgen
 
 import (
 	"context"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const createUser = `-- name: CreateUser :one
@@ -40,16 +42,21 @@ func (q *Queries) ExistsByUsername(ctx context.Context, username string) (bool, 
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT user_id, username, password, nickname
+SELECT user_id, username, password, nickname, avatar_url, bio, email, gender, created_at
 FROM users
 WHERE user_id = $1
 `
 
 type GetUserByIDRow struct {
-	UserID   int64  `db:"user_id" json:"user_id"`
-	Username string `db:"username" json:"username"`
-	Password string `db:"password" json:"password"`
-	Nickname string `db:"nickname" json:"nickname"`
+	UserID    int64              `db:"user_id" json:"user_id"`
+	Username  string             `db:"username" json:"username"`
+	Password  string             `db:"password" json:"password"`
+	Nickname  string             `db:"nickname" json:"nickname"`
+	AvatarUrl string             `db:"avatar_url" json:"avatar_url"`
+	Bio       string             `db:"bio" json:"bio"`
+	Email     *string            `db:"email" json:"email"`
+	Gender    int16              `db:"gender" json:"gender"`
+	CreatedAt pgtype.Timestamptz `db:"created_at" json:"created_at"`
 }
 
 func (q *Queries) GetUserByID(ctx context.Context, userID int64) (GetUserByIDRow, error) {
@@ -60,6 +67,11 @@ func (q *Queries) GetUserByID(ctx context.Context, userID int64) (GetUserByIDRow
 		&i.Username,
 		&i.Password,
 		&i.Nickname,
+		&i.AvatarUrl,
+		&i.Bio,
+		&i.Email,
+		&i.Gender,
+		&i.CreatedAt,
 	)
 	return i, err
 }
@@ -89,11 +101,72 @@ func (q *Queries) GetUserByUsername(ctx context.Context, username string) (GetUs
 	return i, err
 }
 
+const getUserProfile = `-- name: GetUserProfile :one
+SELECT user_id, username, nickname, avatar_url, bio, email, gender, created_at
+FROM users
+WHERE username = $1
+`
+
+type GetUserProfileRow struct {
+	UserID    int64              `db:"user_id" json:"user_id"`
+	Username  string             `db:"username" json:"username"`
+	Nickname  string             `db:"nickname" json:"nickname"`
+	AvatarUrl string             `db:"avatar_url" json:"avatar_url"`
+	Bio       string             `db:"bio" json:"bio"`
+	Email     *string            `db:"email" json:"email"`
+	Gender    int16              `db:"gender" json:"gender"`
+	CreatedAt pgtype.Timestamptz `db:"created_at" json:"created_at"`
+}
+
+func (q *Queries) GetUserProfile(ctx context.Context, username string) (GetUserProfileRow, error) {
+	row := q.db.QueryRow(ctx, getUserProfile, username)
+	var i GetUserProfileRow
+	err := row.Scan(
+		&i.UserID,
+		&i.Username,
+		&i.Nickname,
+		&i.AvatarUrl,
+		&i.Bio,
+		&i.Email,
+		&i.Gender,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const updateLastLogin = `-- name: UpdateLastLogin :exec
 UPDATE users SET last_login_at = NOW() WHERE username = $1
 `
 
 func (q *Queries) UpdateLastLogin(ctx context.Context, username string) error {
 	_, err := q.db.Exec(ctx, updateLastLogin, username)
+	return err
+}
+
+const updateUserProfile = `-- name: UpdateUserProfile :exec
+UPDATE users
+SET nickname = COALESCE($2, nickname),
+    bio = COALESCE($3, bio),
+    email = COALESCE($4, email),
+    gender = COALESCE($5, gender)
+WHERE user_id = $1
+`
+
+type UpdateUserProfileParams struct {
+	UserID   int64   `db:"user_id" json:"user_id"`
+	Nickname string  `db:"nickname" json:"nickname"`
+	Bio      string  `db:"bio" json:"bio"`
+	Email    *string `db:"email" json:"email"`
+	Gender   int16   `db:"gender" json:"gender"`
+}
+
+func (q *Queries) UpdateUserProfile(ctx context.Context, arg UpdateUserProfileParams) error {
+	_, err := q.db.Exec(ctx, updateUserProfile,
+		arg.UserID,
+		arg.Nickname,
+		arg.Bio,
+		arg.Email,
+		arg.Gender,
+	)
 	return err
 }

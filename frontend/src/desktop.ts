@@ -483,10 +483,26 @@ export function createUnifiedAPI(baseURL: string) {
       tauriInvoke<UploadResponse>("api_upload_file", { token, filePath, receiverUsername: receiverUsername ?? null }),
     uploadFile: (token: string, file: File, receiverUsername?: string) =>
       jsApi.uploadFile(token, file, receiverUsername),
+    getProfile: (token: string, username: string) =>
+      runningInTauri()
+        ? tauriInvoke<ProfileData>("api_get_user_profile", { token, username })
+        : jsApi.getProfile(token, username),
+    updateProfile: (token: string, username: string, payload: { nickname?: string; bio?: string; email?: string; gender?: number }) =>
+      runningInTauri()
+        ? tauriInvoke<ProfileData>("api_update_user_profile", { token, username, payload })
+        : jsApi.updateProfile(token, username, payload),
     getDownloadURL: (fileID: number) =>
       `${baseURL}/api/v2/files/${fileID}`,
   };
 }
+
+type ProfileData = {
+  user: { userId: number; username: string; nickname: string; online: boolean };
+  bio: string;
+  gender: number;
+  createdAt: string;
+  email?: string;
+};
 
 // ── Unified Realtime (Tauri WS / browser WebSocket fallback) ──
 

@@ -220,6 +220,19 @@ func (m *Manager) UpdateHeartbeat(username string) {
 	}
 }
 
+// UpdateNickname refreshes the in-memory nickname for an online session.
+func (m *Manager) UpdateNickname(userID int64, nickname string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	s, ok := m.byUserID[userID]
+	if !ok {
+		return false
+	}
+	s.Nickname = nickname
+	return true
+}
+
 // ExpireIdleSessions removes sessions whose last heartbeat is older than timeout.
 //
 // 这个方法给“后台清理器”使用，而不是给业务请求直接调用。

@@ -25,10 +25,33 @@ type CursorResponse[T any] struct {
 
 // User 是 v2 协议中的用户公开结构。
 type User struct {
-	UserID   int64  `json:"userId"`
-	Username string `json:"username"`
-	Nickname string `json:"nickname"`
-	Online   bool   `json:"online"`
+	UserID    int64  `json:"userId"`
+	Username  string `json:"username"`
+	Nickname  string `json:"nickname"`
+	AvatarURL string `json:"avatarUrl,omitempty"`
+	Online    bool   `json:"online"`
+}
+
+// UserProfile is the user's profile visible to other users.
+type UserProfile struct {
+	User      User   `json:"user"`
+	Bio       string `json:"bio"`
+	Gender    int16  `json:"gender"`
+	CreatedAt string `json:"createdAt"`
+}
+
+// OwnProfile adds private fields visible only to the profile owner.
+type OwnProfile struct {
+	UserProfile
+	Email string `json:"email"`
+}
+
+// UpdateProfileRequest is the body for PUT /api/v2/users/{username}/profile.
+type UpdateProfileRequest struct {
+	Nickname *string `json:"nickname,omitempty"`
+	Bio      *string `json:"bio,omitempty"`
+	Email    *string `json:"email,omitempty"`
+	Gender   *int16  `json:"gender,omitempty"`
 }
 
 // FileAttachment 是消息中的文件元数据结构。
