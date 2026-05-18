@@ -28,6 +28,8 @@ type TranslationKey =
   | "auth.loggingIn"
   | "auth.registering"
   | "auth.nicknamePlaceholder"
+  | "auth.switchToRegister"
+  | "auth.switchToLogin"
   | "identity.title"
   | "identity.sessionActive"
   | "identity.sessionMissing"
@@ -239,6 +241,8 @@ const dictionaries: Record<Language, Record<TranslationKey, string>> = {
     "auth.loggingIn": "登录中...",
     "auth.registering": "注册中...",
     "auth.nicknamePlaceholder": "显示名称",
+    "auth.switchToRegister": "没有账号？去注册",
+    "auth.switchToLogin": "已有账号？返回登录",
     "identity.title": "账号",
     "identity.sessionActive": "会话已保存",
     "identity.sessionMissing": "未保存会话",
@@ -447,6 +451,8 @@ const dictionaries: Record<Language, Record<TranslationKey, string>> = {
     "auth.loggingIn": "Signing in...",
     "auth.registering": "Creating account...",
     "auth.nicknamePlaceholder": "Friendly name",
+    "auth.switchToRegister": "Need an account? Register",
+    "auth.switchToLogin": "Already have an account? Sign in",
     "identity.title": "Account",
     "identity.sessionActive": "Session saved",
     "identity.sessionMissing": "Session missing",
