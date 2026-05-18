@@ -4,7 +4,6 @@ import { useChatStore } from "../store/chatStore";
 
 export function AuthPanel() {
   const language = useChatStore((state) => state.language);
-  const status = useChatStore((state) => state.status);
   const loginForm = useChatStore((state) => state.loginForm);
   const registerForm = useChatStore((state) => state.registerForm);
   const error = useChatStore((state) => state.error);
@@ -18,33 +17,18 @@ export function AuthPanel() {
 
   return (
     <section className="panel auth-panel">
-      <div className="auth-panel-copy">
-        <div className="auth-panel-copy-head">
-          <p className="section-label">{t(language, "app.eyebrow")}</p>
-          <h2>{t(language, "auth.welcomeTitle")}</h2>
-          <p className="auth-panel-copy-body">{t(language, "auth.welcomeBody")}</p>
-        </div>
-
-        <div className="auth-feature-list">
-          <div className="auth-feature-item">
-            <span className={`status-dot status-${status}`} />
-            <strong>{t(language, "auth.welcomeRealtime")}</strong>
-          </div>
-          <div className="auth-feature-item">
-            <span className="status-dot status-connected" />
-            <strong>{t(language, "auth.welcomeHistory")}</strong>
-          </div>
-          <div className="auth-feature-item">
-            <span className="status-dot status-idle" />
-            <strong>{t(language, "auth.welcomeDesktop")}</strong>
-          </div>
-        </div>
-      </div>
-
-      <div className="divider" />
-
       <div className="auth-panel-forms">
         <div className="panel auth-form-card">
+          <div className="auth-card-hero">
+            <div className="auth-card-avatar" aria-hidden="true">
+              <span>C3</span>
+            </div>
+            <div className="auth-card-title">
+              <strong>{t(language, "app.title")}</strong>
+              <span>{t(language, "app.eyebrow")}</span>
+            </div>
+          </div>
+
           <div className="form-block">
             <header className="panel-header panel-header-tight">
               <div>
