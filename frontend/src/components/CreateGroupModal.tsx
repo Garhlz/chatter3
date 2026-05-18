@@ -45,41 +45,43 @@ export function CreateGroupModal({ onClose }: { onClose: () => void }) {
           </button>
         </header>
 
-        <div className="form-block modal-form">
-          <label>
-            {t(language, "modal.groupName")}
-            <input
-              value={newGroupName}
-              onChange={(e) => setNewGroupName(e.target.value)}
-              placeholder={t(language, "modal.groupNameHint")}
-              disabled={submitting}
-              data-group-name-input
-            />
-          </label>
-          <label>
-            {t(language, "modal.groupMembers")}
-            <input
-              value={newGroupMembers}
-              onChange={(e) => setNewGroupMembers(e.target.value)}
-              placeholder={t(language, "modal.groupMembersHint")}
-              disabled={submitting}
-            />
-          </label>
-          {submitError ? (
-            <div className="callout error" role="alert">
-              <span>{submitError}</span>
-            </div>
-          ) : null}
-          <button
-            type="button"
-            className="primary-button"
-            disabled={!newGroupName.trim() || submitting}
-            onClick={() => handleCreateGroup().catch(() => {})}
-          >
-            {submitting
-              ? t(language, "modal.creatingGroup")
-              : t(language, "modal.createGroup")}
-          </button>
+        <div className="modal-body">
+          <div className="form-block modal-form">
+            <label>
+              {t(language, "modal.groupName")}
+              <input
+                value={newGroupName}
+                onChange={(e) => setNewGroupName(e.target.value)}
+                placeholder={t(language, "modal.groupNameHint")}
+                disabled={submitting}
+                data-group-name-input
+              />
+            </label>
+            <label>
+              {t(language, "modal.groupMembers")}
+              <input
+                value={newGroupMembers}
+                onChange={(e) => setNewGroupMembers(e.target.value)}
+                placeholder={t(language, "modal.groupMembersHint")}
+                disabled={submitting}
+              />
+            </label>
+            {submitError ? (
+              <div className="callout error" role="alert">
+                <span>{submitError}</span>
+              </div>
+            ) : null}
+            <button
+              type="button"
+              className="primary-button"
+              disabled={!newGroupName.trim() || submitting}
+              onClick={() => handleCreateGroup().catch(() => {})}
+            >
+              {submitting
+                ? t(language, "modal.creatingGroup")
+                : t(language, "modal.createGroup")}
+            </button>
+          </div>
         </div>
       </div>
     </div>

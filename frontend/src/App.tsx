@@ -12,6 +12,7 @@ import {
   listenDesktopWindowState,
 } from "./desktop";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
+import { useWindowSizeClass } from "./hooks/useWindowSizeClass";
 import { statusLabel, t } from "./i18n";
 import { useChatStore } from "./store/chatStore";
 import { resolveThemeMode, watchSystemTheme } from "./theme";
@@ -37,6 +38,8 @@ export function App() {
   const [showCreateGroup, setShowCreateGroup] = useState(false);
   const [showSidebar, setShowSidebar] = useState(false);
   const [profileUsername, setProfileUsername] = useState<string | null>(null);
+  const windowSizeClass = useWindowSizeClass();
+  const isNarrowDesktop = windowSizeClass === "narrow-desktop";
 
   useKeyboardShortcuts();
 
@@ -83,9 +86,15 @@ export function App() {
     };
   }, [reconnect, setDesktopWindowState]);
 
+  useEffect(() => {
+    if (!isNarrowDesktop) {
+      setShowSidebar(false);
+    }
+  }, [isNarrowDesktop]);
+
   if (!currentUser) {
     return (
-      <div className="desktop-shell auth-shell">
+      <div className={`desktop-shell auth-shell size-${windowSizeClass}`}>
         <header className="topbar auth-topbar">
           <div>
             <p className="topbar-eyebrow">{t(language, "app.eyebrow")}</p>
@@ -100,7 +109,7 @@ export function App() {
   }
 
   return (
-    <div className="desktop-shell">
+    <div className={`desktop-shell size-${windowSizeClass}`}>
       <header className="topbar">
         <div>
           <p className="topbar-eyebrow">{t(language, "app.eyebrow")}</p>
@@ -143,8 +152,12 @@ export function App() {
 
       <GlobalFeedback />
 
-      <main className="workspace workspace-two-col">
-        <aside className={`sidebar ${showSidebar ? "show" : ""}`}>
+      <main className={`workspace workspace-two-col workspace-${windowSizeClass}`}>
+        <aside
+          className={`sidebar ${
+            isNarrowDesktop ? "sidebar-overlay" : "sidebar-docked"
+          } ${showSidebar ? "show" : ""}`}
+        >
           <IdentityPanel onProfileClick={() => setProfileUsername(currentUser.username)} />
           <ConversationList
             onProfileOpen={(username) => setProfileUsername(username)}
@@ -153,7 +166,7 @@ export function App() {
           />
         </aside>
 
-        {showSidebar ? (
+        {isNarrowDesktop && showSidebar ? (
           <button
             type="button"
             className="sidebar-backdrop"
@@ -163,7 +176,10 @@ export function App() {
         ) : null}
 
         <section className="stage">
-          <ChatPanel onProfileOpen={(username) => setProfileUsername(username)} />
+          <ChatPanel
+            windowSizeClass={windowSizeClass}
+            onProfileOpen={(username) => setProfileUsername(username)}
+          />
         </section>
       </main>
 

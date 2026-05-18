@@ -50,6 +50,7 @@ npm run dev
 npm run typecheck
 npm run build
 npm run tauri:dev
+npm run tauri:dev -- --api-url=http://127.0.0.1:8080
 cargo check --manifest-path src-tauri/Cargo.toml
 ```
 
@@ -84,7 +85,7 @@ desktop.ts          -> Tauri/browser bridge
 hooks/              -> shared UI hooks
 ```
 
-The Tauri Rust layer handles tray, single-instance activation, notifications, window state, store/keyring integration, local message persistence via SQLite, and the desktop-side HTTP/WS clients. The JS layer accesses these through `frontend/src/desktop.ts`, which delegates to Tauri invoke in desktop mode and falls back to browser HTTP/WS clients in dev mode.
+The Tauri Rust layer handles tray, single-instance activation, notifications, window state, store/keyring integration, local message persistence via SQLite, runtime `--api-url` resolution, and the desktop-side HTTP/WS clients. The JS layer accesses these through `frontend/src/desktop.ts`, which delegates to Tauri invoke in desktop mode and falls back to browser HTTP/WS clients in dev mode.
 
 Token storage is OS credential-store backed in Tauri through the Rust `keyring` crate. This maps to Windows Credential Manager, macOS Keychain, and Linux Secret Service / libsecret. Browser dev still uses `localStorage`.
 

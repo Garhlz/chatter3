@@ -4,8 +4,12 @@ import { useChatStore } from "../store/chatStore";
 
 export function GroupPanel({
   onProfileOpen,
+  mode = "docked",
+  onClose,
 }: {
   onProfileOpen: (username: string) => void;
+  mode?: "docked" | "drawer";
+  onClose?: () => void;
 }) {
   const language = useChatStore((state) => state.language);
   const activeConversation = useChatStore((state) =>
@@ -79,7 +83,7 @@ export function GroupPanel({
   }
 
   return (
-    <section className="panel group-panel">
+    <section className={`panel group-panel group-panel-${mode}`}>
       <header className="panel-header panel-header-tight group-panel-header">
         <div>
           <p className="section-label">{t(language, "group.label")}</p>
@@ -97,6 +101,16 @@ export function GroupPanel({
             </small>
           )}
         </div>
+        {mode === "drawer" && onClose ? (
+          <button
+            type="button"
+            className="secondary-button compact-button"
+            onClick={onClose}
+            aria-label={t(language, "chat.closeDetails")}
+          >
+            ×
+          </button>
+        ) : null}
       </header>
 
       <div className="group-summary-grid">
