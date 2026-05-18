@@ -95,12 +95,6 @@ export function App() {
   if (!currentUser) {
     return (
       <div className={`desktop-shell auth-shell size-${windowSizeClass}`}>
-        <header className="topbar auth-topbar">
-          <div>
-            <p className="topbar-eyebrow">{t(language, "app.eyebrow")}</p>
-            <h1>{t(language, "app.title")}</h1>
-          </div>
-        </header>
         <main className="auth-overlay">
           <AuthPanel />
         </main>
@@ -111,9 +105,9 @@ export function App() {
   return (
     <div className={`desktop-shell size-${windowSizeClass}`}>
       <header className="topbar">
-        <div>
+        <div className="topbar-brand">
           <p className="topbar-eyebrow">{t(language, "app.eyebrow")}</p>
-          <h1>{t(language, "app.title")}</h1>
+          <strong>{t(language, "app.title")}</strong>
         </div>
         <div className="topbar-status">
           <button

@@ -2,6 +2,7 @@
 // 这样 npm run dev 远程开发不受影响，打包成 Tauri 应用时自动用原生能力。
 
 import { createAPIClient as createJsApiClient } from "./api/client";
+import type { RealtimeStatus } from "./realtime/client";
 import type {
   LoginResponse,
   CurrentUser,
@@ -30,6 +31,13 @@ export type DesktopWindowState = {
 };
 
 type Unlisten = () => void;
+
+function normalizeTauriPayload<T>(payload: T | string): T {
+  if (typeof payload === "string") {
+    return JSON.parse(payload) as T;
+  }
+  return payload;
+}
 
 // ── 桌面窗口 / 托盘事件 ──
 
@@ -557,16 +565,21 @@ export function createUnifiedRealtime(wsBaseURL: string) {
       }
     });
 
-    unlistenStatus = await listen<string>("realtime://status", (event) => {
+    unlistenStatus = await listen<{ status: RealtimeStatus } | string>("realtime://status", (event) => {
       try {
-        const { status } = JSON.parse(event.payload);
+        const { status } = normalizeTauriPayload<{ status: RealtimeStatus }>(
+          event.payload,
+        );
         handlers.onStatusChange(status);
       } catch { /* ignore */ }
     });
 
-    unlistenReconnect = await listen<string>("realtime://reconnect", (event) => {
+    unlistenReconnect = await listen<{ attempt: number; delayMs: number } | string>("realtime://reconnect", (event) => {
       try {
-        const { attempt, delayMs } = JSON.parse(event.payload);
+        const { attempt, delayMs } = normalizeTauriPayload<{
+          attempt: number;
+          delayMs: number;
+        }>(event.payload);
         handlers.onReconnectScheduled?.(attempt, delayMs);
       } catch { /* ignore */ }
     });

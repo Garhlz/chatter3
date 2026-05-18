@@ -33,6 +33,7 @@
 - 用户资料查看与本人资料编辑
 - 资料弹窗可直接发起私聊，私聊支持空会话壳
 - 群信息区与成员管理从消息正文抽成稳定侧栏
+- 认证区收口为桌面欢迎壳，登录 / 注册改为单表单切换
 - `zustand` 状态层
 - 页面级全局反馈、移动端侧栏、建群/资料弹窗
 - 默认中文、`Catppuccin Latte` / `One Dark` 双主题、跟随系统
@@ -76,6 +77,8 @@
 - 语言 / 主题通过 `tauri-plugin-store` 存储
 - SQLite 本地消息与会话缓存
 - 桌面启动参数 `--api-url=...`，同时覆盖桌面 HTTP / WebSocket 目标地址
+- Tauri realtime 状态 / 重连事件通过桥接规范化后写回前端状态层
+- 主窗口最小尺寸约束：`1080 x 760`
 - Rust HTTP client：覆盖认证、在线用户、公共/私聊/群历史、群管理、文件上传、资料读写
 - Rust WebSocket client：连接、心跳、自动重连、发送事件，通过 `realtime://event` / `realtime://status` / `realtime://reconnect` 通知前端
 

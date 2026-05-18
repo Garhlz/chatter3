@@ -85,7 +85,7 @@ desktop.ts          -> Tauri/browser bridge
 hooks/              -> shared UI hooks
 ```
 
-The Tauri Rust layer handles tray, single-instance activation, notifications, window state, store/keyring integration, local message persistence via SQLite, runtime `--api-url` resolution, and the desktop-side HTTP/WS clients. The JS layer accesses these through `frontend/src/desktop.ts`, which delegates to Tauri invoke in desktop mode and falls back to browser HTTP/WS clients in dev mode.
+The Tauri Rust layer handles tray, single-instance activation, notifications, window state, store/keyring integration, local message persistence via SQLite, runtime `--api-url` resolution, and the desktop-side HTTP/WS clients. The JS layer accesses these through `frontend/src/desktop.ts`, which delegates to Tauri invoke in desktop mode and falls back to browser HTTP/WS clients in dev mode. The desktop window now enforces a minimum size of `1080 x 760`, and the Tauri realtime bridge normalizes status/reconnect payloads before updating frontend state.
 
 Token storage is OS credential-store backed in Tauri through the Rust `keyring` crate. This maps to Windows Credential Manager, macOS Keychain, and Linux Secret Service / libsecret. Browser dev still uses `localStorage`.
 
@@ -101,6 +101,7 @@ The current UI direction is Workbench-style, with:
 - Day theme based on a warmer Catppuccin Latte palette.
 - Night theme based on One Dark.
 - Theme mode defaults to `system` and can be manually set to day or night.
+- A desktop-style auth shell with single-form login/register switching.
 - Page-level global feedback for notice/error/auth-expired state.
 - A topbar + sidebar + main-stage layout, with mobile sidebar toggle support.
 - A profile modal that doubles as the main identity and "start chat" entry point.
