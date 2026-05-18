@@ -75,6 +75,7 @@
 - JWT 通过 Rust `keyring` 接系统凭据库
 - 语言 / 主题通过 `tauri-plugin-store` 存储
 - SQLite 本地消息与会话缓存
+- 桌面启动参数 `--api-url=...`，同时覆盖桌面 HTTP / WebSocket 目标地址
 - Rust HTTP client：覆盖认证、在线用户、公共/私聊/群历史、群管理、文件上传、资料读写
 - Rust WebSocket client：连接、心跳、自动重连、发送事件，通过 `realtime://event` / `realtime://status` / `realtime://reconnect` 通知前端
 
@@ -211,7 +212,7 @@
 
 - 登录、注册、历史加载、会话派生、群聊管理、消息发送状态如何统一管理
 - 资料弹窗发起私聊、空私聊壳、群信息区摘要如何在状态层落地
-- HTTP 初始化与 realtime 事件如何合流
+- HTTP 初始化、桌面 runtime 配置与 realtime 事件如何合流
 - 未读计数、cursor、optimistic message、本地恢复如何工作
 
 ### 前端桌面抽象
@@ -222,6 +223,7 @@
 
 - 为什么组件不直接调用 Tauri API
 - 浏览器 dev 与桌面路径如何保持同一套上层接口
+- 桌面端如何消费由 Tauri 注入的 runtime HTTP / WebSocket 配置
 
 ### HTTP client
 

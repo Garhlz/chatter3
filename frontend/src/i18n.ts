@@ -11,6 +11,11 @@ type TranslationKey =
   | "dev.lookup"
   | "auth.access"
   | "auth.login"
+  | "auth.welcomeTitle"
+  | "auth.welcomeBody"
+  | "auth.welcomeRealtime"
+  | "auth.welcomeHistory"
+  | "auth.welcomeDesktop"
   | "auth.username"
   | "auth.password"
   | "auth.submit"
@@ -70,6 +75,8 @@ type TranslationKey =
   | "chat.loading"
   | "chat.loadOlder"
   | "chat.reload"
+  | "chat.openDetails"
+  | "chat.closeDetails"
   | "chat.live"
   | "chat.offline"
   | "chat.uploading"
@@ -213,6 +220,11 @@ const dictionaries: Record<Language, Record<TranslationKey, string>> = {
     "dev.lookup": "手动查询",
     "auth.access": "登录",
     "auth.login": "账号登录",
+    "auth.welcomeTitle": "进入桌面聊天工作区",
+    "auth.welcomeBody": "登录后即可恢复本地会话、继续实时聊天，并在桌面窗口内完成私聊、群聊和资料管理。",
+    "auth.welcomeRealtime": "实时在线状态与文本消息",
+    "auth.welcomeHistory": "公共、私聊、群聊历史恢复",
+    "auth.welcomeDesktop": "桌面端主题、会话和窗口状态保持",
     "auth.username": "用户名",
     "auth.password": "密码",
     "auth.submit": "登录",
@@ -274,6 +286,8 @@ const dictionaries: Record<Language, Record<TranslationKey, string>> = {
     "chat.loading": "加载中",
     "chat.loadOlder": "加载更早",
     "chat.reload": "刷新",
+    "chat.openDetails": "查看群信息",
+    "chat.closeDetails": "关闭群信息",
     "chat.live": "在线",
     "chat.offline": "离线",
     "chat.uploading": "上传中...",
@@ -414,6 +428,11 @@ const dictionaries: Record<Language, Record<TranslationKey, string>> = {
     "dev.lookup": "Manual lookup",
     "auth.access": "Access",
     "auth.login": "Login",
+    "auth.welcomeTitle": "Enter the desktop chat workspace",
+    "auth.welcomeBody": "Sign in to restore the local session, continue realtime chat, and manage direct messages, groups, and profiles inside the desktop window.",
+    "auth.welcomeRealtime": "Realtime presence and text messaging",
+    "auth.welcomeHistory": "Public, direct, and group history recovery",
+    "auth.welcomeDesktop": "Desktop theme, session, and window persistence",
     "auth.username": "Username",
     "auth.password": "Password",
     "auth.submit": "Login",
@@ -475,6 +494,8 @@ const dictionaries: Record<Language, Record<TranslationKey, string>> = {
     "chat.loading": "Loading",
     "chat.loadOlder": "Load older",
     "chat.reload": "Reload",
+    "chat.openDetails": "Open group info",
+    "chat.closeDetails": "Close group info",
     "chat.live": "Live",
     "chat.offline": "Offline",
     "chat.uploading": "Uploading...",

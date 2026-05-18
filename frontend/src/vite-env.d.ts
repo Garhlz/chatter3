@@ -8,3 +8,10 @@ interface ImportMetaEnv {
 interface ImportMeta {
   readonly env: ImportMetaEnv;
 }
+
+interface Window {
+  __CHATTER_RUNTIME_CONFIG__?: {
+    httpBaseURL: string;
+    wsBaseURL: string;
+  };
+}

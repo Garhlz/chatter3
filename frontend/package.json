@@ -8,7 +8,7 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "tauri:dev": "tauri dev",
+    "tauri:dev": "tauri dev -- --",
     "tauri:build": "tauri build"
   },
   "dependencies": {

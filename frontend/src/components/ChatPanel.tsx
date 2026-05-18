@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useShallow } from "zustand/shallow";
 import { Composer } from "./Composer";
 import {
@@ -7,6 +7,7 @@ import {
 } from "./conversationPresentation";
 import { GroupPanel } from "./GroupPanel";
 import { MessageList } from "./MessageList";
+import type { WindowSizeClass } from "../hooks/useWindowSizeClass";
 import { t } from "../i18n";
 import {
   selectActiveConversation,
@@ -16,7 +17,13 @@ import {
 } from "../store/chatStore";
 import { cli } from "./utils";
 
-export function ChatPanel({ onProfileOpen }: { onProfileOpen: (username: string) => void }) {
+export function ChatPanel({
+  onProfileOpen,
+  windowSizeClass,
+}: {
+  onProfileOpen: (username: string) => void;
+  windowSizeClass: WindowSizeClass;
+}) {
   const language = useChatStore((state) => state.language);
   const token = useChatStore((state) => state.token);
   const status = useChatStore((state) => state.status);
@@ -34,6 +41,7 @@ export function ChatPanel({ onProfileOpen }: { onProfileOpen: (username: string)
   const reloadActiveHistory = useChatStore((state) => state.reloadActiveHistory);
   const uploadFile = useChatStore((state) => state.uploadFile);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [showGroupPanel, setShowGroupPanel] = useState(false);
 
   function handleBrowserFilePick() {
     fileInputRef.current?.click();
@@ -77,6 +85,18 @@ export function ChatPanel({ onProfileOpen }: { onProfileOpen: (username: string)
             name: conversationDisplayTitle(activeConversation),
           })
         : activeConversation.title;
+  const groupPanelMode =
+    windowSizeClass === "expanded" || windowSizeClass === "regular"
+      ? "docked"
+      : "drawer";
+  const canDockGroupPanel =
+    activeConversation.scope === "group" && groupPanelMode === "docked";
+  const canToggleGroupPanel =
+    activeConversation.scope === "group" && groupPanelMode === "drawer";
+
+  useEffect(() => {
+    setShowGroupPanel(false);
+  }, [activeConversation.id, groupPanelMode]);
 
   return (
     <section className="panel conversation-panel">
@@ -88,82 +108,119 @@ export function ChatPanel({ onProfileOpen }: { onProfileOpen: (username: string)
       />
 
       <header className="conversation-header">
-        <div>
+        <div className="conversation-heading">
           <p className="section-label">{t(language, "chat.conversation")} / {historyScopeLabel}</p>
           <h2>{conversationTitle}</h2>
           <small>{conversationStaticSummary(language, activeConversation)}</small>
         </div>
-        <div className="header-actions">
-          <span className="scope-badge">{messageCountLabel}</span>
-          {activeStats.sendingCount > 0 ? (
-            <span className="scope-badge scope-badge-warn">
-              {t(language, "chat.sending", { count: activeStats.sendingCount })}
+        <div className="conversation-toolbar">
+          <div className="conversation-toolbar-status">
+            <span className={`scope-badge ${isConnected ? "scope-badge-live" : ""}`}>
+              {isConnected ? t(language, "chat.live") : t(language, "chat.offline")}
             </span>
-          ) : null}
-          {activeStats.failedCount > 0 ? (
-            <span className="scope-badge scope-badge-error">
-              {t(language, "chat.failed", { count: activeStats.failedCount })}
-            </span>
-          ) : null}
-          {activeConversation.updatedAt ? (
-            <span className="scope-badge">
-              {new Date(activeConversation.updatedAt).toLocaleTimeString()}
-            </span>
-          ) : null}
-          {activeHistoryCursor ? (
+            <span className="scope-badge">{messageCountLabel}</span>
+            {activeStats.sendingCount > 0 ? (
+              <span className="scope-badge scope-badge-warn">
+                {t(language, "chat.sending", { count: activeStats.sendingCount })}
+              </span>
+            ) : null}
+            {activeStats.failedCount > 0 ? (
+              <span className="scope-badge scope-badge-error">
+                {t(language, "chat.failed", { count: activeStats.failedCount })}
+              </span>
+            ) : null}
+            {activeConversation.updatedAt ? (
+              <span className="scope-badge">
+                {new Date(activeConversation.updatedAt).toLocaleTimeString()}
+              </span>
+            ) : null}
+          </div>
+          <div className="header-actions">
+            {activeHistoryCursor ? (
+              <button
+                type="button"
+                className="secondary-button compact-button"
+                disabled={historyLoading}
+                onClick={cli(() => loadOlderHistory())}
+              >
+                {historyLoading ? t(language, "chat.loading") : t(language, "chat.loadOlder")}
+              </button>
+            ) : null}
             <button
               type="button"
               className="secondary-button compact-button"
-              disabled={historyLoading}
-              onClick={cli(() => loadOlderHistory())}
+              disabled={!token || historyLoading}
+              onClick={cli(() => reloadActiveHistory())}
             >
-              {historyLoading ? t(language, "chat.loading") : t(language, "chat.loadOlder")}
+              {t(language, "chat.reload")}
             </button>
-          ) : null}
-          <button
-            type="button"
-            className="secondary-button compact-button"
-            disabled={!token || historyLoading}
-            onClick={cli(() => reloadActiveHistory())}
-          >
-            {t(language, "chat.reload")}
-          </button>
-          <span className={`scope-badge ${isConnected ? "scope-badge-live" : ""}`}>
-            {isConnected ? t(language, "chat.live") : t(language, "chat.offline")}
-          </span>
-          <button
-            type="button"
-            className="secondary-button compact-button"
-            disabled={!token || uploadingFile}
-            onClick={() => handlePickFile()}
-          >
-            {uploadingFile ? t(language, "chat.uploading") : t(language, "chat.attachFile")}
-          </button>
+            {canToggleGroupPanel ? (
+              <button
+                type="button"
+                className="secondary-button compact-button"
+                onClick={() => setShowGroupPanel((value) => !value)}
+              >
+                {showGroupPanel
+                  ? t(language, "chat.closeDetails")
+                  : t(language, "chat.openDetails")}
+              </button>
+            ) : null}
+            <button
+              type="button"
+              className="secondary-button compact-button"
+              disabled={!token || uploadingFile}
+              onClick={() => handlePickFile()}
+            >
+              {uploadingFile ? t(language, "chat.uploading") : t(language, "chat.attachFile")}
+            </button>
+          </div>
         </div>
       </header>
 
-      {activeConversation.scope === "group" ? (
-        <div className="group-chat-layout">
+      <div
+        className={`conversation-body ${
+          activeConversation.scope === "group"
+            ? `group-chat-layout group-chat-layout-${groupPanelMode}`
+            : "conversation-body-default"
+        }`}
+      >
+        <div className="conversation-main-column">
           <MessageList onProfileOpen={onProfileOpen} />
-          <GroupPanel onProfileOpen={onProfileOpen} />
-        </div>
-      ) : (
-        <MessageList onProfileOpen={onProfileOpen} />
-      )}
+          {lastSelectedFile && !uploadingFile ? (
+            <div className="callout neutral file-callout">
+              {t(language, "chat.selected", { file: lastSelectedFile })}
+            </div>
+          ) : null}
 
-      {lastSelectedFile && !uploadingFile ? (
-        <div className="callout neutral file-callout">
-          {t(language, "chat.selected", { file: lastSelectedFile })}
+          {uploadingFile ? (
+            <div className="callout neutral">
+              {t(language, "chat.uploading")} {lastSelectedFile}
+            </div>
+          ) : null}
+
+          <Composer />
+        </div>
+
+        {activeConversation.scope === "group" && canDockGroupPanel ? (
+          <GroupPanel mode="docked" onProfileOpen={onProfileOpen} />
+        ) : null}
+      </div>
+
+      {activeConversation.scope === "group" && canToggleGroupPanel && showGroupPanel ? (
+        <div className="info-drawer-shell">
+          <button
+            type="button"
+            className="info-drawer-backdrop"
+            onClick={() => setShowGroupPanel(false)}
+            aria-label={t(language, "chat.closeDetails")}
+          />
+          <GroupPanel
+            mode="drawer"
+            onClose={() => setShowGroupPanel(false)}
+            onProfileOpen={onProfileOpen}
+          />
         </div>
       ) : null}
-
-      {uploadingFile ? (
-        <div className="callout neutral">
-          {t(language, "chat.uploading")} {lastSelectedFile}
-        </div>
-      ) : null}
-
-      <Composer />
     </section>
   );
 }

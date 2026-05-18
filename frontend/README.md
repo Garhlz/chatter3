@@ -48,6 +48,21 @@ cd frontend
 npm run tauri:dev
 ```
 
+如果需要在桌面端启动时切换后端地址，可以直接追加运行参数：
+
+```bash
+cd frontend
+npm run tauri:dev -- --api-url=http://192.168.1.20:8080
+```
+
+说明：
+
+- `frontend/package.json` 的 `tauri:dev` 已经内置 `tauri dev -- --`，会把追加参数直接转发给桌面应用本身，而不是传给 `cargo run`
+- `--api-url` 期望的是后端 HTTP 基址，例如 `http://host:8080`
+- Tauri 会用这个值同时覆盖桌面端 HTTP client 和 WebSocket 连接地址
+- WebSocket 地址会自动推导为 `ws://host:8080/api/v2/ws` 或 `wss://.../api/v2/ws`
+- 若同时设置 `CHATTER_API_URL` 和 `--api-url`，以启动参数为准
+
 类型检查与构建：
 
 ```bash
@@ -123,6 +138,7 @@ npm run dev
 
 - 系统托盘
 - 单实例保护
+- 桌面启动参数 `--api-url=...`，同时覆盖 HTTP / WebSocket 目标地址
 - 窗口位置/大小/最大化状态恢复
 - 原生通知
 - 主题与语言本地持久化

@@ -2,6 +2,7 @@ mod api;
 mod db;
 mod realtime;
 
+use reqwest::Url;
 use tauri::{
     Emitter,
     menu::{Menu, MenuItem},
@@ -11,6 +12,14 @@ use tauri::{
 
 const CREDENTIAL_SERVICE: &str = "chatter3";
 const TOKEN_CREDENTIAL_USER: &str = "jwt";
+
+#[derive(Clone, serde::Serialize)]
+struct RuntimeConfig {
+    #[serde(rename = "httpBaseURL")]
+    http_base_url: String,
+    #[serde(rename = "wsBaseURL")]
+    ws_base_url: String,
+}
 
 fn show_main_window(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
@@ -54,15 +63,71 @@ fn clear_desktop_token() -> Result<(), String> {
     }
 }
 
+fn parse_api_url_from_args() -> Option<String> {
+    let mut args = std::env::args().skip(1);
+    while let Some(arg) = args.next() {
+        if let Some(value) = arg.strip_prefix("--api-url=") {
+            return Some(value.to_string());
+        }
+        if arg == "--api-url" {
+            return args.next();
+        }
+    }
+    None
+}
+
+fn normalize_http_base_url(base_url: &str) -> String {
+    base_url.trim_end_matches('/').to_string()
+}
+
+fn derive_ws_base_url(http_base_url: &str) -> Result<String, String> {
+    let mut url = Url::parse(http_base_url)
+        .map_err(|error| format!("invalid api url '{http_base_url}': {error}"))?;
+    match url.scheme() {
+        "http" => url.set_scheme("ws").expect("valid ws scheme"),
+        "https" => url.set_scheme("wss").expect("valid wss scheme"),
+        scheme => {
+            return Err(format!(
+                "unsupported api url scheme '{scheme}', expected http or https"
+            ))
+        }
+    }
+
+    let mut segments = url
+        .path_segments_mut()
+        .map_err(|_| format!("api url '{http_base_url}' cannot be used as a base path"))?;
+    segments.push("api");
+    segments.push("v2");
+    segments.push("ws");
+    drop(segments);
+
+    Ok(url.to_string())
+}
+
+fn resolve_runtime_config() -> Result<RuntimeConfig, String> {
+    let api_base_url = parse_api_url_from_args()
+        .or_else(|| std::env::var("CHATTER_API_URL").ok())
+        .unwrap_or_else(|| "http://127.0.0.1:8080".to_string());
+    let http_base_url = normalize_http_base_url(&api_base_url);
+    let ws_base_url = derive_ws_base_url(&http_base_url)?;
+
+    Ok(RuntimeConfig {
+        http_base_url,
+        ws_base_url,
+    })
+}
+
 pub fn run() {
-    // HTTP API base URL: default to localhost:8080 for Tauri production,
-    // overridable via CHATTER_API_URL env var.
-    let api_base_url = std::env::var("CHATTER_API_URL")
-        .unwrap_or_else(|_| "http://127.0.0.1:8080".to_string());
-    let http_client = api::new_http_client(api_base_url);
+    let runtime_config = resolve_runtime_config().expect("failed to resolve runtime config");
+    let http_client = api::new_http_client(runtime_config.http_base_url.clone());
     let realtime_handle = realtime::RealtimeHandle::new();
+    let runtime_config_script = format!(
+        "window.__CHATTER_RUNTIME_CONFIG__ = Object.freeze({});",
+        serde_json::to_string(&runtime_config).expect("runtime config must serialize")
+    );
 
     tauri::Builder::default()
+        .append_invoke_initialization_script(runtime_config_script)
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             show_main_window(app);
         }))

@@ -116,154 +116,156 @@ export function UserProfileModal({
           </button>
         </header>
 
-        {loading ? (
-          <p className="text-muted">{t(language, "profile.loading")}</p>
-        ) : loadError ? (
-          <div className="callout error" role="alert">
-            <span>{loadError}</span>
-          </div>
-        ) : profile ? (
-          editing ? (
-            <div className="form-block profile-form">
-              {profile.user.avatarUrl && (
-                <img
-                  src={profile.user.avatarUrl}
-                  alt=""
-                  className="profile-avatar profile-avatar-small"
-                />
-              )}
-              <label>
-                {t(language, "profile.nickname")}
-                <input
-                  value={nickname}
-                  onChange={(e) => setNickname(e.target.value)}
-                  disabled={saving}
-                />
-              </label>
-              <label>
-                {t(language, "profile.bio")}
-                <input
-                  value={bio}
-                  onChange={(e) => setBio(e.target.value)}
-                  disabled={saving}
-                />
-              </label>
-              <label>
-                {t(language, "profile.email")}
-                <input
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  disabled={saving}
-                />
-              </label>
-              <label>
-                {t(language, "profile.gender")}
-                <select
-                  value={gender}
-                  onChange={(e) => setGender(Number(e.target.value))}
-                  disabled={saving}
-                >
-                  <option value={0}>{t(language, "profile.genderUnspecified")}</option>
-                  <option value={1}>{t(language, "profile.genderMale")}</option>
-                  <option value={2}>{t(language, "profile.genderFemale")}</option>
-                  <option value={3}>{t(language, "profile.genderOther")}</option>
-                </select>
-              </label>
-              {saveError ? (
-                <div className="callout error" role="alert">
-                  <span>{saveError}</span>
-                </div>
-              ) : null}
-              <div className="profile-actions">
-                <button
-                  type="button"
-                  className="primary-button"
-                  disabled={saving}
-                  onClick={() => handleSave().catch(() => {})}
-                >
-                  {saving ? t(language, "profile.saving") : t(language, "profile.save")}
-                </button>
-                <button
-                  type="button"
-                  className="secondary-button"
-                  disabled={saving}
-                  onClick={() => setEditing(false)}
-                >
-                  {t(language, "profile.cancel")}
-                </button>
-              </div>
+        <div className="modal-body">
+          {loading ? (
+            <p className="text-muted">{t(language, "profile.loading")}</p>
+          ) : loadError ? (
+            <div className="callout error" role="alert">
+              <span>{loadError}</span>
             </div>
-          ) : (
-            <div className="profile-view">
-              <div className="profile-hero">
+          ) : profile ? (
+            editing ? (
+              <div className="form-block profile-form">
                 {profile.user.avatarUrl && (
                   <img
                     src={profile.user.avatarUrl}
                     alt=""
-                    className="profile-avatar"
+                    className="profile-avatar profile-avatar-small"
                   />
                 )}
-                <div className="profile-hero-copy">
-                  <div className="profile-hero-headline">
-                    <strong>{profile.user.nickname}</strong>
-                    <span
-                      className={`scope-badge ${
-                        profile.user.online ? "scope-badge-live" : ""
-                      }`}
-                    >
-                      {profile.user.online
-                        ? t(language, "chat.live")
-                        : t(language, "chat.offline")}
-                    </span>
-                  </div>
-                  <span>@{profile.user.username}</span>
-                  <small>
-                    {t(language, "profile.joined")}{" "}
-                    {new Date(profile.createdAt).toLocaleDateString()}
-                  </small>
-                </div>
-              </div>
-              <div className="profile-actions">
-                {isOwn ? (
-                  <button
-                    type="button"
-                    onClick={() => setEditing(true)}
-                    className="secondary-button profile-edit-trigger"
+                <label>
+                  {t(language, "profile.nickname")}
+                  <input
+                    value={nickname}
+                    onChange={(e) => setNickname(e.target.value)}
+                    disabled={saving}
+                  />
+                </label>
+                <label>
+                  {t(language, "profile.bio")}
+                  <input
+                    value={bio}
+                    onChange={(e) => setBio(e.target.value)}
+                    disabled={saving}
+                  />
+                </label>
+                <label>
+                  {t(language, "profile.email")}
+                  <input
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    disabled={saving}
+                  />
+                </label>
+                <label>
+                  {t(language, "profile.gender")}
+                  <select
+                    value={gender}
+                    onChange={(e) => setGender(Number(e.target.value))}
+                    disabled={saving}
                   >
-                    {t(language, "profile.edit")}
-                  </button>
-                ) : onStartConversation ? (
+                    <option value={0}>{t(language, "profile.genderUnspecified")}</option>
+                    <option value={1}>{t(language, "profile.genderMale")}</option>
+                    <option value={2}>{t(language, "profile.genderFemale")}</option>
+                    <option value={3}>{t(language, "profile.genderOther")}</option>
+                  </select>
+                </label>
+                {saveError ? (
+                  <div className="callout error" role="alert">
+                    <span>{saveError}</span>
+                  </div>
+                ) : null}
+                <div className="profile-actions">
                   <button
                     type="button"
                     className="primary-button"
-                    onClick={() => onStartConversation(username)}
+                    disabled={saving}
+                    onClick={() => handleSave().catch(() => {})}
                   >
-                    {t(language, "profile.startConversation")}
+                    {saving ? t(language, "profile.saving") : t(language, "profile.save")}
                   </button>
-                ) : null}
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    disabled={saving}
+                    onClick={() => setEditing(false)}
+                  >
+                    {t(language, "profile.cancel")}
+                  </button>
+                </div>
               </div>
-              {genderLabel(profile.gender) && (
-                <div className="profile-field">
-                  <span className="text-muted">{t(language, "profile.gender")}</span>
-                  <span>{genderLabel(profile.gender)}</span>
+            ) : (
+              <div className="profile-view">
+                <div className="profile-hero">
+                  {profile.user.avatarUrl && (
+                    <img
+                      src={profile.user.avatarUrl}
+                      alt=""
+                      className="profile-avatar"
+                    />
+                  )}
+                  <div className="profile-hero-copy">
+                    <div className="profile-hero-headline">
+                      <strong>{profile.user.nickname}</strong>
+                      <span
+                        className={`scope-badge ${
+                          profile.user.online ? "scope-badge-live" : ""
+                        }`}
+                      >
+                        {profile.user.online
+                          ? t(language, "chat.live")
+                          : t(language, "chat.offline")}
+                      </span>
+                    </div>
+                    <span>@{profile.user.username}</span>
+                    <small>
+                      {t(language, "profile.joined")}{" "}
+                      {new Date(profile.createdAt).toLocaleDateString()}
+                    </small>
+                  </div>
                 </div>
-              )}
-              {profile.bio && (
-                <div className="profile-field">
-                  <p>{profile.bio}</p>
+                <div className="profile-actions">
+                  {isOwn ? (
+                    <button
+                      type="button"
+                      onClick={() => setEditing(true)}
+                      className="secondary-button profile-edit-trigger"
+                    >
+                      {t(language, "profile.edit")}
+                    </button>
+                  ) : onStartConversation ? (
+                    <button
+                      type="button"
+                      className="primary-button"
+                      onClick={() => onStartConversation(username)}
+                    >
+                      {t(language, "profile.startConversation")}
+                    </button>
+                  ) : null}
                 </div>
-              )}
-              {isOwn && profile.email && (
-                <div className="profile-field">
-                  <span className="text-muted">{t(language, "profile.email")}</span>
-                  <span>{profile.email}</span>
-                </div>
-              )}
-            </div>
-          )
-        ) : (
-          <p className="text-muted">{t(language, "profile.notFound")}</p>
-        )}
+                {genderLabel(profile.gender) && (
+                  <div className="profile-field">
+                    <span className="text-muted">{t(language, "profile.gender")}</span>
+                    <span>{genderLabel(profile.gender)}</span>
+                  </div>
+                )}
+                {profile.bio && (
+                  <div className="profile-field">
+                    <p>{profile.bio}</p>
+                  </div>
+                )}
+                {isOwn && profile.email && (
+                  <div className="profile-field">
+                    <span className="text-muted">{t(language, "profile.email")}</span>
+                    <span>{profile.email}</span>
+                  </div>
+                )}
+              </div>
+            )
+          ) : (
+            <p className="text-muted">{t(language, "profile.notFound")}</p>
+          )}
+        </div>
       </div>
     </div>
   );
