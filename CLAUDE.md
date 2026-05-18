@@ -101,12 +101,13 @@ The current UI direction is Workbench-style, with:
 - Day theme based on a warmer Catppuccin Latte palette.
 - Night theme based on One Dark.
 - Theme mode defaults to `system` and can be manually set to day or night.
-- A desktop-style auth shell with single-form login/register switching.
+- A standalone centered login card (no app shell) with single-form login/register switching.
+- A settings modal (⚙ topbar button) for language, theme, and developer panel access.
 - Page-level global feedback for notice/error/auth-expired state.
 - A topbar + sidebar + main-stage layout, with mobile sidebar toggle support.
 - A profile modal that doubles as the main identity and "start chat" entry point.
-- Group conversations split into a message area plus a stable group info panel.
-- Conversation cards distinguish public/private/group scope and support empty private shells.
+- Group conversations split into a message area plus a stable group info side panel (with role badge, creator info, summary grid, and local member action errors).
+- Conversation cards with scope labels and empty private shell hints; a centered settings modal replaces the inline identity language/theme controls.
 
 ## Working Rules
 

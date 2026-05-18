@@ -5,6 +5,7 @@ import { ConversationList } from "./components/ConversationList";
 import { CreateGroupModal } from "./components/CreateGroupModal";
 import { DevPanel } from "./components/DevPanel";
 import { GlobalFeedback } from "./components/GlobalFeedback";
+import { SettingsModal } from "./components/SettingsModal";
 import { IdentityPanel } from "./components/IdentityPanel";
 import { UserProfileModal } from "./components/UserProfileModal";
 import {
@@ -35,6 +36,7 @@ export function App() {
   const bootstrapSession = useChatStore((state) => state.bootstrapSession);
 
   const [showDev, setShowDev] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [showCreateGroup, setShowCreateGroup] = useState(false);
   const [showSidebar, setShowSidebar] = useState(false);
   const [profileUsername, setProfileUsername] = useState<string | null>(null);
@@ -94,11 +96,9 @@ export function App() {
 
   if (!currentUser) {
     return (
-      <div className={`desktop-shell auth-shell size-${windowSizeClass}`}>
-        <main className="auth-overlay">
-          <AuthPanel />
-        </main>
-      </div>
+      <main className="auth-overlay">
+        <AuthPanel />
+      </main>
     );
   }
 
@@ -134,12 +134,12 @@ export function App() {
           </div>
           <button
             type="button"
-            className="secondary-button compact-button topbar-dev-toggle"
-            onClick={() => setShowDev(!showDev)}
-            aria-label={t(language, "app.toggleDev")}
-            title={t(language, "app.toggleDev")}
+            className="secondary-button compact-button topbar-settings-btn"
+            onClick={() => setShowSettings(true)}
+            aria-label={t(language, "settings.title")}
+            title={t(language, "settings.title")}
           >
-            {showDev ? "×" : "Dev"}
+            ⚙
           </button>
         </div>
       </header>
@@ -177,6 +177,12 @@ export function App() {
         </section>
       </main>
 
+      {showSettings && (
+        <SettingsModal
+          onClose={() => setShowSettings(false)}
+          onOpenDev={() => setShowDev(true)}
+        />
+      )}
       {showDev && <DevPanel onClose={() => setShowDev(false)} />}
       {showCreateGroup && (
         <CreateGroupModal onClose={() => setShowCreateGroup(false)} />

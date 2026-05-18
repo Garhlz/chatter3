@@ -208,7 +208,12 @@ type TranslationKey =
   | "group.roleMember"
   | "group.roleOwnerHint"
   | "group.roleAdminHint"
-  | "group.roleMemberHint";
+  | "group.roleMemberHint"
+  | "settings.label"
+  | "settings.title"
+  | "settings.language"
+  | "settings.theme"
+  | "settings.devPanel";
 
 const dictionaries: Record<Language, Record<TranslationKey, string>> = {
   "zh-CN": {
@@ -419,6 +424,11 @@ const dictionaries: Record<Language, Record<TranslationKey, string>> = {
     "group.roleOwnerHint": "你是该群群主",
     "group.roleAdminHint": "你是该群管理员",
     "group.roleMemberHint": "你是该群成员",
+    "settings.label": "设置",
+    "settings.title": "偏好设置",
+    "settings.language": "语言",
+    "settings.theme": "主题",
+    "settings.devPanel": "开发者面板",
     "error.restoreSession": "恢复保存会话失败",
   },
   "en-US": {
@@ -629,6 +639,11 @@ const dictionaries: Record<Language, Record<TranslationKey, string>> = {
     "group.roleOwnerHint": "You are the group owner",
     "group.roleAdminHint": "You are a group admin",
     "group.roleMemberHint": "You are a member",
+    "settings.label": "Settings",
+    "settings.title": "Preferences",
+    "settings.language": "Language",
+    "settings.theme": "Theme",
+    "settings.devPanel": "Developer panel",
     "error.restoreSession": "Failed to restore saved session",
   },
 };
