@@ -12,7 +12,7 @@ Active execution queues live here:
 ## Current Status
 
 - Current stack: Go backend + Tauri/React/Vite desktop client.
-- Legacy `client/` and `server/` are frozen as historical reference.
+- Legacy Qt/C++ and Java source trees have been removed; protocol-v1 remains as the historical contract reference.
 - Stable contract: auth, history, online users, multi-connection WebSocket sessions, public/private/group text and file messages, profile media, and realtime navigation/profile updates.
 - Unstable or missing contract: group deletion, read receipts, recall, and cross-device read-state sync.
 
@@ -28,8 +28,6 @@ Active execution queues live here:
 
 The older phase roadmap has been retired because P0-P3, file transfer, group chat, and the main backend testing pass are complete. Use the child TODO files for active work.
 
-Historical references remain useful when comparing behavior:
+The historical protocol remains useful when comparing behavior:
 
 - Old protocol archaeology: [docs/protocol-v1.md](docs/protocol-v1.md)
-- Old Qt client: [client/](client/)
-- Old Java server: [server/](server/)

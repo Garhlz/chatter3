@@ -100,7 +100,6 @@ Chatter3 是旧聊天系统的第三代重写：
 
 - `backend-go/`：当前 `protocol-v2` 的 Go 后端。
 - `frontend/`：Tauri 2 + React + Vite 桌面客户端。
-- `client/` 和 `server/`：冻结的旧 Qt/C++ 客户端与 Java 服务端，仅作历史参考。
 - `docs/protocol-v1.md`：旧 TCP + JSON + 换行分帧协议。
 - `docs/protocol-v2.md`：当前 HTTP + JSON、WebSocket + JSON 协议契约。
 
@@ -211,4 +210,4 @@ Tauri Rust 层负责托盘、单实例、原生通知、窗口状态、系统凭
 - 修改 Tauri Rust 后，至少运行 `cargo check --manifest-path frontend/src-tauri/Cargo.toml`（或在 `frontend/` 下使用对应相对路径）。
 - 修改 Go 后端后，运行相关包测试；影响面较大时运行 `go test ./...`。
 - 集成测试需要 PostgreSQL，不要把缺少数据库环境误报成代码失败。
-- 除非任务明确涉及历史实现，否则不要修改冻结的 `client/` 和 `server/`。
+- 旧 Qt/C++ 客户端与 Java 服务端源码已从仓库移除；需要追溯旧行为时，优先查阅 `docs/protocol-v1.md` 和 Git 历史。

@@ -1,6 +1,6 @@
 # Chatter3
 
-Chatter3 是 Chatter 聊天系统的第三代重写：Go 后端 + Tauri 2 + React + Vite 桌面客户端，替代旧 Java 服务器和 Qt C++ 客户端。
+Chatter3 是 Chatter 聊天系统的第三代重写：Go 后端 + Tauri 2 + React + Vite 桌面客户端。仓库已移除不再维护的 Java 服务器和 Qt/C++ 客户端源码，仅保留 v1 协议文档用于说明演进背景。
 
 ## 项目结构
 
@@ -11,8 +11,6 @@ chatter3/
 │   ├── src/             # React Web 层 (UI, 状态管理)
 │   └── src-tauri/       # Rust 桌面壳 (托盘, 通知, SQLite, HTTP/WS 客户端)
 ├── docs/                # 协议文档与开发架构说明
-├── server/              # 旧 Java 服务器（冻结）
-├── client/              # 旧 Qt C++ 客户端（冻结）
 ├── AGENTS.md            # 唯一协作规范与项目指南
 ├── CLAUDE.md            # 指向 AGENTS.md 的兼容软链接
 └── TODO.md              # 项目总路线图
