@@ -34,10 +34,11 @@ type User struct {
 
 // UserProfile is the user's profile visible to other users.
 type UserProfile struct {
-	User      User   `json:"user"`
-	Bio       string `json:"bio"`
-	Gender    int16  `json:"gender"`
-	CreatedAt string `json:"createdAt"`
+	User          User   `json:"user"`
+	BackgroundURL string `json:"backgroundUrl,omitempty"`
+	Bio           string `json:"bio"`
+	Gender        int16  `json:"gender"`
+	CreatedAt     string `json:"createdAt"`
 }
 
 // OwnProfile adds private fields visible only to the profile owner.
@@ -99,6 +100,12 @@ type LoginResponse struct {
 
 type UploadResponse struct {
 	File FileAttachment `json:"file"`
+}
+
+// ProfileChangedPayload 只包含公开资料，可安全广播给其他在线用户。
+// email 属于本人私有字段，因此不会出现在 realtime 事件中。
+type ProfileChangedPayload struct {
+	Profile UserProfile `json:"profile"`
 }
 
 // Event 是所有 WebSocket 消息的统一外层。

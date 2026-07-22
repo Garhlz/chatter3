@@ -42,21 +42,22 @@ func (q *Queries) ExistsByUsername(ctx context.Context, username string) (bool, 
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT user_id, username, password, nickname, avatar_url, bio, email, gender, created_at
+SELECT user_id, username, password, nickname, avatar_url, background_url, bio, email, gender, created_at
 FROM users
 WHERE user_id = $1
 `
 
 type GetUserByIDRow struct {
-	UserID    int64              `db:"user_id" json:"user_id"`
-	Username  string             `db:"username" json:"username"`
-	Password  string             `db:"password" json:"password"`
-	Nickname  string             `db:"nickname" json:"nickname"`
-	AvatarUrl string             `db:"avatar_url" json:"avatar_url"`
-	Bio       string             `db:"bio" json:"bio"`
-	Email     *string            `db:"email" json:"email"`
-	Gender    int16              `db:"gender" json:"gender"`
-	CreatedAt pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	UserID        int64              `db:"user_id" json:"user_id"`
+	Username      string             `db:"username" json:"username"`
+	Password      string             `db:"password" json:"password"`
+	Nickname      string             `db:"nickname" json:"nickname"`
+	AvatarUrl     string             `db:"avatar_url" json:"avatar_url"`
+	BackgroundUrl string             `db:"background_url" json:"background_url"`
+	Bio           string             `db:"bio" json:"bio"`
+	Email         *string            `db:"email" json:"email"`
+	Gender        int16              `db:"gender" json:"gender"`
+	CreatedAt     pgtype.Timestamptz `db:"created_at" json:"created_at"`
 }
 
 func (q *Queries) GetUserByID(ctx context.Context, userID int64) (GetUserByIDRow, error) {
@@ -68,6 +69,7 @@ func (q *Queries) GetUserByID(ctx context.Context, userID int64) (GetUserByIDRow
 		&i.Password,
 		&i.Nickname,
 		&i.AvatarUrl,
+		&i.BackgroundUrl,
 		&i.Bio,
 		&i.Email,
 		&i.Gender,
@@ -77,16 +79,17 @@ func (q *Queries) GetUserByID(ctx context.Context, userID int64) (GetUserByIDRow
 }
 
 const getUserByUsername = `-- name: GetUserByUsername :one
-SELECT user_id, username, password, nickname
+SELECT user_id, username, password, nickname, avatar_url
 FROM users
 WHERE username = $1
 `
 
 type GetUserByUsernameRow struct {
-	UserID   int64  `db:"user_id" json:"user_id"`
-	Username string `db:"username" json:"username"`
-	Password string `db:"password" json:"password"`
-	Nickname string `db:"nickname" json:"nickname"`
+	UserID    int64  `db:"user_id" json:"user_id"`
+	Username  string `db:"username" json:"username"`
+	Password  string `db:"password" json:"password"`
+	Nickname  string `db:"nickname" json:"nickname"`
+	AvatarUrl string `db:"avatar_url" json:"avatar_url"`
 }
 
 func (q *Queries) GetUserByUsername(ctx context.Context, username string) (GetUserByUsernameRow, error) {
@@ -97,25 +100,27 @@ func (q *Queries) GetUserByUsername(ctx context.Context, username string) (GetUs
 		&i.Username,
 		&i.Password,
 		&i.Nickname,
+		&i.AvatarUrl,
 	)
 	return i, err
 }
 
 const getUserProfile = `-- name: GetUserProfile :one
-SELECT user_id, username, nickname, avatar_url, bio, email, gender, created_at
+SELECT user_id, username, nickname, avatar_url, background_url, bio, email, gender, created_at
 FROM users
 WHERE username = $1
 `
 
 type GetUserProfileRow struct {
-	UserID    int64              `db:"user_id" json:"user_id"`
-	Username  string             `db:"username" json:"username"`
-	Nickname  string             `db:"nickname" json:"nickname"`
-	AvatarUrl string             `db:"avatar_url" json:"avatar_url"`
-	Bio       string             `db:"bio" json:"bio"`
-	Email     *string            `db:"email" json:"email"`
-	Gender    int16              `db:"gender" json:"gender"`
-	CreatedAt pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	UserID        int64              `db:"user_id" json:"user_id"`
+	Username      string             `db:"username" json:"username"`
+	Nickname      string             `db:"nickname" json:"nickname"`
+	AvatarUrl     string             `db:"avatar_url" json:"avatar_url"`
+	BackgroundUrl string             `db:"background_url" json:"background_url"`
+	Bio           string             `db:"bio" json:"bio"`
+	Email         *string            `db:"email" json:"email"`
+	Gender        int16              `db:"gender" json:"gender"`
+	CreatedAt     pgtype.Timestamptz `db:"created_at" json:"created_at"`
 }
 
 func (q *Queries) GetUserProfile(ctx context.Context, username string) (GetUserProfileRow, error) {
@@ -126,6 +131,7 @@ func (q *Queries) GetUserProfile(ctx context.Context, username string) (GetUserP
 		&i.Username,
 		&i.Nickname,
 		&i.AvatarUrl,
+		&i.BackgroundUrl,
 		&i.Bio,
 		&i.Email,
 		&i.Gender,
@@ -140,6 +146,34 @@ UPDATE users SET last_login_at = NOW() WHERE username = $1
 
 func (q *Queries) UpdateLastLogin(ctx context.Context, username string) error {
 	_, err := q.db.Exec(ctx, updateLastLogin, username)
+	return err
+}
+
+const updateUserAvatarURL = `-- name: UpdateUserAvatarURL :exec
+UPDATE users SET avatar_url = $2 WHERE user_id = $1
+`
+
+type UpdateUserAvatarURLParams struct {
+	UserID    int64  `db:"user_id" json:"user_id"`
+	AvatarUrl string `db:"avatar_url" json:"avatar_url"`
+}
+
+func (q *Queries) UpdateUserAvatarURL(ctx context.Context, arg UpdateUserAvatarURLParams) error {
+	_, err := q.db.Exec(ctx, updateUserAvatarURL, arg.UserID, arg.AvatarUrl)
+	return err
+}
+
+const updateUserBackgroundURL = `-- name: UpdateUserBackgroundURL :exec
+UPDATE users SET background_url = $2 WHERE user_id = $1
+`
+
+type UpdateUserBackgroundURLParams struct {
+	UserID        int64  `db:"user_id" json:"user_id"`
+	BackgroundUrl string `db:"background_url" json:"background_url"`
+}
+
+func (q *Queries) UpdateUserBackgroundURL(ctx context.Context, arg UpdateUserBackgroundURLParams) error {
+	_, err := q.db.Exec(ctx, updateUserBackgroundURL, arg.UserID, arg.BackgroundUrl)
 	return err
 }
 

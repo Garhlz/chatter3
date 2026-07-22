@@ -15,7 +15,7 @@ RETURNING file_id;
 
 -- name: GetPublicHistory :many
 SELECT m.message_id, m.sender_id, m.content, m.message_type, m.created_at,
-       u.username, u.nickname,
+       u.username, u.nickname, u.avatar_url,
        f.file_id, f.file_name, f.stored_file_name, f.file_size, f.file_type
 FROM messages m
 JOIN users u ON u.user_id = m.sender_id
@@ -27,7 +27,7 @@ LIMIT sqlc.arg('limit');
 
 -- name: GetPrivateHistory :many
 SELECT m.message_id, m.sender_id, m.receiver_id, m.content, m.message_type, m.created_at,
-       s.username AS sender_username, s.nickname AS sender_nickname,
+       s.username AS sender_username, s.nickname AS sender_nickname, s.avatar_url AS sender_avatar_url,
        r.username AS receiver_username, r.nickname AS receiver_nickname,
        f.file_id, f.file_name, f.stored_file_name, f.file_size, f.file_type
 FROM messages m
@@ -43,6 +43,7 @@ LIMIT sqlc.arg('limit');
 
 -- name: GetFileByID :one
 SELECT f.file_id, f.message_id, m.sender_id, m.receiver_id,
+       m.group_id,
        f.file_name, f.stored_file_name, f.file_url, f.file_size, f.file_type,
        COALESCE(f.md5, '') AS md5, m.created_at
 FROM files f

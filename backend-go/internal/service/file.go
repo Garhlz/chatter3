@@ -24,16 +24,19 @@ import (
 )
 
 var (
-	ErrFileRequired  = errors.New("file is required")
-	ErrFileTooLarge  = errors.New("file is too large")
-	ErrForbiddenFile = errors.New("forbidden file access")
+	ErrFileRequired      = errors.New("file is required")
+	ErrFileTooLarge      = errors.New("file is too large")
+	ErrForbiddenFile     = errors.New("forbidden file access")
+	ErrInvalidFileTarget = errors.New("invalid file target")
 )
 
 type FileUploadInput struct {
 	SenderID         int64
 	SenderUsername   string
 	SenderNickname   string
+	SenderAvatarURL  string
 	ReceiverUsername string
+	GroupID          int64
 	FileName         string
 	MIMEType         string
 	Size             int64
@@ -51,6 +54,8 @@ type FileDownload struct {
 
 type FileUploadResult struct {
 	ReceiverUsername string
+	GroupID          int64
+	GroupUsernames   []string
 	Message          *protocolv2.Message
 	File             protocolv2.FileAttachment
 }
@@ -61,6 +66,7 @@ type fileRecord struct {
 	MessageID      int64
 	SenderID       int64
 	ReceiverID     *int64
+	GroupID        *int64
 	FileName       string
 	StoredFileName string
 	FileURL        string
@@ -95,12 +101,37 @@ func NewFileService(
 }
 
 func (s *FileService) SaveUpload(ctx context.Context, in FileUploadInput) (*FileUploadResult, error) {
+	if strings.TrimSpace(in.ReceiverUsername) != "" && in.GroupID > 0 {
+		return nil, fmt.Errorf("%w: receiverUsername and groupID are mutually exclusive", ErrInvalidFileTarget)
+	}
 	fileName := strings.TrimSpace(filepath.Base(in.FileName))
 	if fileName == "" || in.Reader == nil {
 		return nil, ErrFileRequired
 	}
 	if in.Size > s.maxFileSize {
 		return nil, ErrFileTooLarge
+	}
+	var groupUsernames []string
+	if in.GroupID > 0 {
+		if _, err := s.queries.GetGroupByID(ctx, in.GroupID); errors.Is(err, pgx.ErrNoRows) {
+			return nil, repository.ErrNotFound
+		} else if err != nil {
+			return nil, err
+		}
+		memberCount, err := s.queries.IsGroupMember(ctx, sqlcgen.IsGroupMemberParams{
+			GroupID: in.GroupID,
+			UserID:  in.SenderID,
+		})
+		if err != nil {
+			return nil, err
+		}
+		if memberCount == 0 {
+			return nil, ErrNotGroupMember
+		}
+		groupUsernames, err = s.queries.GetMemberUsernames(ctx, in.GroupID)
+		if err != nil {
+			return nil, fmt.Errorf("load group file recipients: %w", err)
+		}
 	}
 
 	if err := os.MkdirAll(s.uploadDir, 0o755); err != nil {
@@ -163,14 +194,16 @@ func (s *FileService) SaveUpload(ctx context.Context, in FileUploadInput) (*File
 
 	message := &protocolv2.Message{
 		MessageID: record.MessageID,
-		Scope:     messageScope(receiverUsername),
+		Scope:     messageScope(receiverUsername, in.GroupID),
 		Sender: protocolv2.User{
-			UserID:   in.SenderID,
-			Username: in.SenderUsername,
-			Nickname: in.SenderNickname,
-			Online:   s.sessions.IsOnline(in.SenderUsername),
+			UserID:    in.SenderID,
+			Username:  in.SenderUsername,
+			Nickname:  in.SenderNickname,
+			AvatarURL: in.SenderAvatarURL,
+			Online:    s.sessions.IsOnline(in.SenderUsername),
 		},
 		ReceiverUsername: receiverUsername,
+		GroupID:          in.GroupID,
 		ContentType:      "file",
 		Content:          fileName,
 		File:             &fileAttachment,
@@ -179,6 +212,8 @@ func (s *FileService) SaveUpload(ctx context.Context, in FileUploadInput) (*File
 
 	return &FileUploadResult{
 		ReceiverUsername: receiverUsername,
+		GroupID:          in.GroupID,
+		GroupUsernames:   groupUsernames,
 		Message:          message,
 		File:             fileAttachment,
 	}, nil
@@ -193,7 +228,18 @@ func (s *FileService) GetDownload(ctx context.Context, requesterUserID int64, fi
 		return nil, fmt.Errorf("get file: %w", err)
 	}
 
-	if record.ReceiverID != nil && requesterUserID != record.SenderID && requesterUserID != *record.ReceiverID {
+	if record.GroupID != nil {
+		memberCount, memberErr := s.queries.IsGroupMember(ctx, sqlcgen.IsGroupMemberParams{
+			GroupID: *record.GroupID,
+			UserID:  requesterUserID,
+		})
+		if memberErr != nil {
+			return nil, fmt.Errorf("check group file access: %w", memberErr)
+		}
+		if memberCount == 0 {
+			return nil, ErrForbiddenFile
+		}
+	} else if record.ReceiverID != nil && requesterUserID != record.SenderID && requesterUserID != *record.ReceiverID {
 		return nil, ErrForbiddenFile
 	}
 
@@ -210,6 +256,45 @@ func (s *FileService) GetDownload(ctx context.Context, requesterUserID int64, fi
 func (s *FileService) createFileMessage(ctx context.Context, in FileUploadInput, fileName, storedFileName, fileURL, mimeType string, written int64, md5Hex string) (*fileRecord, string, error) {
 	content := fileName
 	receiverUsername := strings.TrimSpace(in.ReceiverUsername)
+	if in.GroupID > 0 {
+		tx, txErr := s.pool.BeginTx(ctx, pgx.TxOptions{})
+		if txErr != nil {
+			return nil, "", fmt.Errorf("begin group file tx: %w", txErr)
+		}
+		defer func() { _ = tx.Rollback(ctx) }()
+		q := s.queries.WithTx(tx)
+		groupID := in.GroupID
+		msgRow, insertErr := q.InsertGroupMessage(ctx, sqlcgen.InsertGroupMessageParams{
+			SenderID:    in.SenderID,
+			GroupID:     &groupID,
+			MessageType: 1,
+			Content:     content,
+		})
+		if insertErr != nil {
+			return nil, "", fmt.Errorf("insert group file message: %w", insertErr)
+		}
+		fileID, insertErr := q.InsertFile(ctx, sqlcgen.InsertFileParams{
+			MessageID:      msgRow.MessageID,
+			FileName:       fileName,
+			StoredFileName: storedFileName,
+			FileUrl:        fileURL,
+			FileSize:       written,
+			FileType:       &mimeType,
+			Md5:            &md5Hex,
+		})
+		if insertErr != nil {
+			return nil, "", fmt.Errorf("insert group file: %w", insertErr)
+		}
+		if commitErr := tx.Commit(ctx); commitErr != nil {
+			return nil, "", fmt.Errorf("commit group file tx: %w", commitErr)
+		}
+		return &fileRecord{
+			FileID: fileID, MessageID: msgRow.MessageID, SenderID: in.SenderID,
+			GroupID: &groupID, FileName: fileName, StoredFileName: storedFileName,
+			FileURL: fileURL, Size: written, MIMEType: mimeType, MD5: md5Hex,
+			CreatedAt: msgRow.CreatedAt.Time,
+		}, "", nil
+	}
 
 	if receiverUsername == "" {
 		tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
@@ -361,7 +446,10 @@ func generateStoredFileName(fileName string) string {
 	return fmt.Sprintf("%s-%s%s", now, base, ext)
 }
 
-func messageScope(receiverUsername string) string {
+func messageScope(receiverUsername string, groupID int64) string {
+	if groupID > 0 {
+		return "group"
+	}
 	if receiverUsername == "" {
 		return "public"
 	}

@@ -13,6 +13,7 @@ import (
 
 const getFileByID = `-- name: GetFileByID :one
 SELECT f.file_id, f.message_id, m.sender_id, m.receiver_id,
+       m.group_id,
        f.file_name, f.stored_file_name, f.file_url, f.file_size, f.file_type,
        COALESCE(f.md5, '') AS md5, m.created_at
 FROM files f
@@ -25,6 +26,7 @@ type GetFileByIDRow struct {
 	MessageID      int64              `db:"message_id" json:"message_id"`
 	SenderID       int64              `db:"sender_id" json:"sender_id"`
 	ReceiverID     *int64             `db:"receiver_id" json:"receiver_id"`
+	GroupID        *int64             `db:"group_id" json:"group_id"`
 	FileName       string             `db:"file_name" json:"file_name"`
 	StoredFileName string             `db:"stored_file_name" json:"stored_file_name"`
 	FileUrl        string             `db:"file_url" json:"file_url"`
@@ -42,6 +44,7 @@ func (q *Queries) GetFileByID(ctx context.Context, fileID int64) (GetFileByIDRow
 		&i.MessageID,
 		&i.SenderID,
 		&i.ReceiverID,
+		&i.GroupID,
 		&i.FileName,
 		&i.StoredFileName,
 		&i.FileUrl,
@@ -55,7 +58,7 @@ func (q *Queries) GetFileByID(ctx context.Context, fileID int64) (GetFileByIDRow
 
 const getPrivateHistory = `-- name: GetPrivateHistory :many
 SELECT m.message_id, m.sender_id, m.receiver_id, m.content, m.message_type, m.created_at,
-       s.username AS sender_username, s.nickname AS sender_nickname,
+       s.username AS sender_username, s.nickname AS sender_nickname, s.avatar_url AS sender_avatar_url,
        r.username AS receiver_username, r.nickname AS receiver_nickname,
        f.file_id, f.file_name, f.stored_file_name, f.file_size, f.file_type
 FROM messages m
@@ -86,6 +89,7 @@ type GetPrivateHistoryRow struct {
 	CreatedAt        pgtype.Timestamptz `db:"created_at" json:"created_at"`
 	SenderUsername   string             `db:"sender_username" json:"sender_username"`
 	SenderNickname   string             `db:"sender_nickname" json:"sender_nickname"`
+	SenderAvatarUrl  string             `db:"sender_avatar_url" json:"sender_avatar_url"`
 	ReceiverUsername string             `db:"receiver_username" json:"receiver_username"`
 	ReceiverNickname string             `db:"receiver_nickname" json:"receiver_nickname"`
 	FileID           *int64             `db:"file_id" json:"file_id"`
@@ -118,6 +122,7 @@ func (q *Queries) GetPrivateHistory(ctx context.Context, arg GetPrivateHistoryPa
 			&i.CreatedAt,
 			&i.SenderUsername,
 			&i.SenderNickname,
+			&i.SenderAvatarUrl,
 			&i.ReceiverUsername,
 			&i.ReceiverNickname,
 			&i.FileID,
@@ -138,7 +143,7 @@ func (q *Queries) GetPrivateHistory(ctx context.Context, arg GetPrivateHistoryPa
 
 const getPublicHistory = `-- name: GetPublicHistory :many
 SELECT m.message_id, m.sender_id, m.content, m.message_type, m.created_at,
-       u.username, u.nickname,
+       u.username, u.nickname, u.avatar_url,
        f.file_id, f.file_name, f.stored_file_name, f.file_size, f.file_type
 FROM messages m
 JOIN users u ON u.user_id = m.sender_id
@@ -162,6 +167,7 @@ type GetPublicHistoryRow struct {
 	CreatedAt      pgtype.Timestamptz `db:"created_at" json:"created_at"`
 	Username       string             `db:"username" json:"username"`
 	Nickname       string             `db:"nickname" json:"nickname"`
+	AvatarUrl      string             `db:"avatar_url" json:"avatar_url"`
 	FileID         *int64             `db:"file_id" json:"file_id"`
 	FileName       *string            `db:"file_name" json:"file_name"`
 	StoredFileName *string            `db:"stored_file_name" json:"stored_file_name"`
@@ -186,6 +192,7 @@ func (q *Queries) GetPublicHistory(ctx context.Context, arg GetPublicHistoryPara
 			&i.CreatedAt,
 			&i.Username,
 			&i.Nickname,
+			&i.AvatarUrl,
 			&i.FileID,
 			&i.FileName,
 			&i.StoredFileName,

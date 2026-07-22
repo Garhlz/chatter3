@@ -286,7 +286,10 @@ func TestHandleV2FileUploadAndDownloadIntegration(t *testing.T) {
 	bobID := insertHTTPTestUser(t, pool, "file_bob_"+suffix, "Bob")
 	carolID := insertHTTPTestUser(t, pool, "file_carol_"+suffix, "Carol")
 	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM files WHERE message_id IN (SELECT message_id FROM messages WHERE sender_id IN ($1, $2, $3) OR receiver_id IN ($1, $2, $3))`, aliceID, bobID, carolID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM group_members WHERE group_id IN (SELECT group_id FROM groups WHERE creator_id = $1)`, aliceID)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM messages WHERE sender_id IN ($1, $2, $3) OR receiver_id IN ($1, $2, $3)`, aliceID, bobID, carolID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM groups WHERE creator_id = $1`, aliceID)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE user_id IN ($1, $2, $3)`, aliceID, bobID, carolID)
 	})
 
@@ -342,6 +345,20 @@ func TestHandleV2FileUploadAndDownloadIntegration(t *testing.T) {
 	}
 
 	downloadFileAs(t, server, carolID, "file_carol_"+suffix, "Carol", privateFileID, http.StatusForbidden)
+
+	server.groupSvc = appsvc.NewGroupService(pool, sqlcgen.New(pool), server.sessions)
+	group, err := server.groupSvc.CreateGroup(
+		ctx, aliceID, "file_alice_"+suffix, "Alice", "file-group", []string{"file_bob_" + suffix},
+	)
+	if err != nil {
+		t.Fatalf("create file test group: %v", err)
+	}
+	groupFileID := uploadFileAsTarget(
+		t, server, aliceID, "file_alice_"+suffix, "Alice",
+		"group.txt", "hello group file", "", group.GroupID,
+	)
+	downloadFileAs(t, server, bobID, "file_bob_"+suffix, "Bob", groupFileID, http.StatusOK)
+	downloadFileAs(t, server, carolID, "file_carol_"+suffix, "Carol", groupFileID, http.StatusForbidden)
 }
 
 func TestHandleV2FileUploadErrorsIntegration(t *testing.T) {
@@ -703,6 +720,7 @@ func newFileIntegrationServer(pool *pgxpool.Pool, uploadDir string) *Server {
 		jwtSvc:   jwtSvc,
 		msgSvc:   appsvc.NewMessageService(queries, sessions),
 		fileSvc:  appsvc.NewFileService(pool, queries, sessions, uploadDir, 8*1024*1024),
+		groupSvc: appsvc.NewGroupService(pool, queries, sessions),
 	}
 }
 
@@ -901,6 +919,10 @@ func containsHTTPFileMessage(messages []protocolv2.Message, fileID int64, fileNa
 }
 
 func uploadFileAs(t *testing.T, server *Server, userID int64, username, nickname, fileName, body, receiverUsername string) int64 {
+	return uploadFileAsTarget(t, server, userID, username, nickname, fileName, body, receiverUsername, 0)
+}
+
+func uploadFileAsTarget(t *testing.T, server *Server, userID int64, username, nickname, fileName, body, receiverUsername string, groupID int64) int64 {
 	t.Helper()
 
 	token := signTestToken(t, server, userID, username, nickname)
@@ -916,6 +938,11 @@ func uploadFileAs(t *testing.T, server *Server, userID int64, username, nickname
 	if receiverUsername != "" {
 		if err := writer.WriteField("receiverUsername", receiverUsername); err != nil {
 			t.Fatalf("write receiver username field: %v", err)
+		}
+	}
+	if groupID > 0 {
+		if err := writer.WriteField("groupID", strconv.FormatInt(groupID, 10)); err != nil {
+			t.Fatalf("write group id field: %v", err)
 		}
 	}
 	if err := writer.Close(); err != nil {

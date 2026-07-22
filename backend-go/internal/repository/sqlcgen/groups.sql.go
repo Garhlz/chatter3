@@ -53,7 +53,7 @@ func (q *Queries) CreateGroup(ctx context.Context, arg CreateGroupParams) (Group
 
 const getGroupByID = `-- name: GetGroupByID :one
 SELECT g.group_id, g.group_name, g.creator_id, g.created_at,
-       u.username, u.nickname
+       u.username, u.nickname, u.avatar_url
 FROM groups g
 JOIN users u ON u.user_id = g.creator_id
 WHERE g.group_id = $1
@@ -66,6 +66,7 @@ type GetGroupByIDRow struct {
 	CreatedAt pgtype.Timestamptz `db:"created_at" json:"created_at"`
 	Username  string             `db:"username" json:"username"`
 	Nickname  string             `db:"nickname" json:"nickname"`
+	AvatarUrl string             `db:"avatar_url" json:"avatar_url"`
 }
 
 func (q *Queries) GetGroupByID(ctx context.Context, groupID int64) (GetGroupByIDRow, error) {
@@ -78,13 +79,14 @@ func (q *Queries) GetGroupByID(ctx context.Context, groupID int64) (GetGroupByID
 		&i.CreatedAt,
 		&i.Username,
 		&i.Nickname,
+		&i.AvatarUrl,
 	)
 	return i, err
 }
 
 const getGroupHistory = `-- name: GetGroupHistory :many
 SELECT m.message_id, m.sender_id, m.content, m.message_type, m.created_at,
-       u.username, u.nickname,
+       u.username, u.nickname, u.avatar_url,
        f.file_id, f.file_name, f.stored_file_name, f.file_size, f.file_type
 FROM messages m
 JOIN users u ON u.user_id = m.sender_id
@@ -109,6 +111,7 @@ type GetGroupHistoryRow struct {
 	CreatedAt      pgtype.Timestamptz `db:"created_at" json:"created_at"`
 	Username       string             `db:"username" json:"username"`
 	Nickname       string             `db:"nickname" json:"nickname"`
+	AvatarUrl      string             `db:"avatar_url" json:"avatar_url"`
 	FileID         *int64             `db:"file_id" json:"file_id"`
 	FileName       *string            `db:"file_name" json:"file_name"`
 	StoredFileName *string            `db:"stored_file_name" json:"stored_file_name"`
@@ -133,6 +136,7 @@ func (q *Queries) GetGroupHistory(ctx context.Context, arg GetGroupHistoryParams
 			&i.CreatedAt,
 			&i.Username,
 			&i.Nickname,
+			&i.AvatarUrl,
 			&i.FileID,
 			&i.FileName,
 			&i.StoredFileName,
@@ -150,7 +154,7 @@ func (q *Queries) GetGroupHistory(ctx context.Context, arg GetGroupHistoryParams
 }
 
 const getGroupMembers = `-- name: GetGroupMembers :many
-SELECT u.user_id, u.username, u.nickname, gm.role, gm.joined_at
+SELECT u.user_id, u.username, u.nickname, u.avatar_url, gm.role, gm.joined_at
 FROM group_members gm
 JOIN users u ON u.user_id = gm.user_id
 WHERE gm.group_id = $1
@@ -158,11 +162,12 @@ ORDER BY gm.joined_at ASC
 `
 
 type GetGroupMembersRow struct {
-	UserID   int64              `db:"user_id" json:"user_id"`
-	Username string             `db:"username" json:"username"`
-	Nickname string             `db:"nickname" json:"nickname"`
-	Role     int16              `db:"role" json:"role"`
-	JoinedAt pgtype.Timestamptz `db:"joined_at" json:"joined_at"`
+	UserID    int64              `db:"user_id" json:"user_id"`
+	Username  string             `db:"username" json:"username"`
+	Nickname  string             `db:"nickname" json:"nickname"`
+	AvatarUrl string             `db:"avatar_url" json:"avatar_url"`
+	Role      int16              `db:"role" json:"role"`
+	JoinedAt  pgtype.Timestamptz `db:"joined_at" json:"joined_at"`
 }
 
 func (q *Queries) GetGroupMembers(ctx context.Context, groupID int64) ([]GetGroupMembersRow, error) {
@@ -178,6 +183,7 @@ func (q *Queries) GetGroupMembers(ctx context.Context, groupID int64) ([]GetGrou
 			&i.UserID,
 			&i.Username,
 			&i.Nickname,
+			&i.AvatarUrl,
 			&i.Role,
 			&i.JoinedAt,
 		); err != nil {
@@ -236,7 +242,7 @@ func (q *Queries) GetMemberUsernames(ctx context.Context, groupID int64) ([]stri
 
 const getUserGroups = `-- name: GetUserGroups :many
 SELECT g.group_id, g.group_name, g.creator_id, g.created_at,
-       u.username, u.nickname
+       u.username, u.nickname, u.avatar_url
 FROM groups g
 JOIN group_members gm ON gm.group_id = g.group_id
 JOIN users u ON u.user_id = g.creator_id
@@ -251,6 +257,7 @@ type GetUserGroupsRow struct {
 	CreatedAt pgtype.Timestamptz `db:"created_at" json:"created_at"`
 	Username  string             `db:"username" json:"username"`
 	Nickname  string             `db:"nickname" json:"nickname"`
+	AvatarUrl string             `db:"avatar_url" json:"avatar_url"`
 }
 
 func (q *Queries) GetUserGroups(ctx context.Context, userID int64) ([]GetUserGroupsRow, error) {
@@ -269,6 +276,7 @@ func (q *Queries) GetUserGroups(ctx context.Context, userID int64) ([]GetUserGro
 			&i.CreatedAt,
 			&i.Username,
 			&i.Nickname,
+			&i.AvatarUrl,
 		); err != nil {
 			return nil, err
 		}

@@ -45,15 +45,16 @@ type Message struct {
 }
 
 type User struct {
-	UserID      int64              `db:"user_id" json:"user_id"`
-	Username    string             `db:"username" json:"username"`
-	Password    string             `db:"password" json:"password"`
-	Nickname    string             `db:"nickname" json:"nickname"`
-	AvatarUrl   string             `db:"avatar_url" json:"avatar_url"`
-	Status      int16              `db:"status" json:"status"`
-	CreatedAt   pgtype.Timestamptz `db:"created_at" json:"created_at"`
-	LastLoginAt pgtype.Timestamptz `db:"last_login_at" json:"last_login_at"`
-	Bio         string             `db:"bio" json:"bio"`
-	Email       *string            `db:"email" json:"email"`
-	Gender      int16              `db:"gender" json:"gender"`
+	UserID        int64              `db:"user_id" json:"user_id"`
+	Username      string             `db:"username" json:"username"`
+	Password      string             `db:"password" json:"password"`
+	Nickname      string             `db:"nickname" json:"nickname"`
+	AvatarUrl     string             `db:"avatar_url" json:"avatar_url"`
+	Status        int16              `db:"status" json:"status"`
+	CreatedAt     pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	LastLoginAt   pgtype.Timestamptz `db:"last_login_at" json:"last_login_at"`
+	Bio           string             `db:"bio" json:"bio"`
+	Email         *string            `db:"email" json:"email"`
+	Gender        int16              `db:"gender" json:"gender"`
+	BackgroundUrl string             `db:"background_url" json:"background_url"`
 }

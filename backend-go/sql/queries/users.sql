@@ -1,10 +1,10 @@
 -- name: GetUserByUsername :one
-SELECT user_id, username, password, nickname
+SELECT user_id, username, password, nickname, avatar_url
 FROM users
 WHERE username = $1;
 
 -- name: GetUserByID :one
-SELECT user_id, username, password, nickname, avatar_url, bio, email, gender, created_at
+SELECT user_id, username, password, nickname, avatar_url, background_url, bio, email, gender, created_at
 FROM users
 WHERE user_id = $1;
 
@@ -27,7 +27,13 @@ SET nickname = COALESCE($2, nickname),
     gender = COALESCE($5, gender)
 WHERE user_id = $1;
 
+-- name: UpdateUserAvatarURL :exec
+UPDATE users SET avatar_url = $2 WHERE user_id = $1;
+
+-- name: UpdateUserBackgroundURL :exec
+UPDATE users SET background_url = $2 WHERE user_id = $1;
+
 -- name: GetUserProfile :one
-SELECT user_id, username, nickname, avatar_url, bio, email, gender, created_at
+SELECT user_id, username, nickname, avatar_url, background_url, bio, email, gender, created_at
 FROM users
 WHERE username = $1;

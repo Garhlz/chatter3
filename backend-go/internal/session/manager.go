@@ -13,6 +13,7 @@ type Session struct {
 	UserID        int64
 	Username      string
 	Nickname      string
+	AvatarURL     string
 	LastHeartbeat time.Time
 	Close         func() error
 	closeOnce     sync.Once
@@ -38,8 +39,8 @@ func (s *Session) Shutdown() {
 // Manager 管理所有在线会话，线程安全。
 type Manager struct {
 	mu       sync.RWMutex
-	byUser   map[string]*Session // username -> session
-	byUserID map[int64]*Session  // userId  -> session
+	byUser   map[string][]*Session // username -> all active connections
+	byUserID map[int64][]*Session  // userId -> all active connections
 }
 
 // Snapshot is a transport-friendly read model of an online session.
@@ -47,30 +48,30 @@ type Manager struct {
 // session 包只提供“当前在线状态的稳定快照”，不直接依赖 protocol-v2，
 // 这样 HTTP 和后续别的 transport 都能复用这份视图。
 type Snapshot struct {
-	UserID   int64
-	Username string
-	Nickname string
-	Online   bool
+	UserID    int64
+	Username  string
+	Nickname  string
+	AvatarURL string
+	Online    bool
 }
 
 func NewManager() *Manager {
 	return &Manager{
-		byUser:   make(map[string]*Session),
-		byUserID: make(map[int64]*Session),
+		byUser:   make(map[string][]*Session),
+		byUserID: make(map[int64][]*Session),
 	}
 }
 
-// Register 注册新会话（登录成功后调用）。
-// 若同一用户已有会话，会尽力关闭旧连接，避免客户端以为自己还在线。
-func (m *Manager) Register(s *Session) {
+// Register 注册一条已认证连接，并返回该用户此前是否完全离线。
+// 同一个账号可以同时打开 Web 和桌面端；每条连接独立维护心跳和发送队列。
+func (m *Manager) Register(s *Session) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if old, ok := m.byUser[s.Username]; ok {
-		old.Shutdown()
-	}
-	m.byUser[s.Username] = s
-	m.byUserID[s.UserID] = s
+	wasOffline := len(m.byUser[s.Username]) == 0
+	m.byUser[s.Username] = append(m.byUser[s.Username], s)
+	m.byUserID[s.UserID] = append(m.byUserID[s.UserID], s)
+	return wasOffline
 }
 
 // Remove 注销会话（断线/登出时调用），幂等。
@@ -78,53 +79,61 @@ func (m *Manager) Remove(username string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	s, ok := m.byUser[username]
-	if !ok {
+	sessions := m.byUser[username]
+	if len(sessions) == 0 {
 		return
 	}
 	delete(m.byUser, username)
-	delete(m.byUserID, s.UserID)
+	delete(m.byUserID, sessions[0].UserID)
 }
 
-// RemoveSession removes a session only if the exact session pointer is still current.
-//
-// 这样可以避免“同一用户新连接顶掉旧连接”时，旧连接退出又把新会话误删掉。
-// 对 WebSocket 这类长连接来说，这个保护很重要，否则重连会把在线状态弄乱。
-// 返回值表示目标 session 是否真的被移除。transport 层只有在返回 true 时
-// 才应该广播 offline；如果旧连接已被新连接替换，该用户实际上仍然在线。
+// RemoveSession 只移除指定连接，返回该用户是否因此变为完全离线。
 func (m *Manager) RemoveSession(target *Session) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	current, ok := m.byUser[target.Username]
-	if !ok || current != target {
+	sessions := m.byUser[target.Username]
+	remaining, removed := withoutSession(sessions, target)
+	if !removed {
 		return false
 	}
-	delete(m.byUser, target.Username)
-	delete(m.byUserID, target.UserID)
-	return true
+	if len(remaining) == 0 {
+		delete(m.byUser, target.Username)
+		delete(m.byUserID, target.UserID)
+		return true
+	}
+	m.byUser[target.Username] = remaining
+	m.byUserID[target.UserID], _ = withoutSession(m.byUserID[target.UserID], target)
+	return false
 }
 
 // Get 通过 username 查找会话，未登录返回 nil。
 func (m *Manager) Get(username string) *Session {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return m.byUser[username]
+	sessions := m.byUser[username]
+	if len(sessions) == 0 {
+		return nil
+	}
+	return sessions[len(sessions)-1]
 }
 
 // GetByID 通过 userId 查找会话。
 func (m *Manager) GetByID(userID int64) *Session {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return m.byUserID[userID]
+	sessions := m.byUserID[userID]
+	if len(sessions) == 0 {
+		return nil
+	}
+	return sessions[len(sessions)-1]
 }
 
 // IsOnline 检查用户是否在线。
 func (m *Manager) IsOnline(username string) bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	_, ok := m.byUser[username]
-	return ok
+	return len(m.byUser[username]) > 0
 }
 
 // OnlineUsernames 返回当前所有在线用户名快照。
@@ -144,12 +153,14 @@ func (m *Manager) OnlineSnapshots() []Snapshot {
 	defer m.mu.RUnlock()
 
 	snapshots := make([]Snapshot, 0, len(m.byUser))
-	for _, s := range m.byUser {
+	for _, sessions := range m.byUser {
+		s := sessions[len(sessions)-1]
 		snapshots = append(snapshots, Snapshot{
-			UserID:   s.UserID,
-			Username: s.Username,
-			Nickname: s.Nickname,
-			Online:   true,
+			UserID:    s.UserID,
+			Username:  s.Username,
+			Nickname:  s.Nickname,
+			AvatarURL: s.AvatarURL,
+			Online:    true,
 		})
 	}
 	slices.SortFunc(snapshots, func(a, b Snapshot) int {
@@ -169,14 +180,16 @@ func (m *Manager) OnlineSnapshots() []Snapshot {
 func (m *Manager) Broadcast(msg []byte, excludeUsername string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	for uname, s := range m.byUser {
+	for uname, sessions := range m.byUser {
 		if uname == excludeUsername {
 			continue
 		}
-		select {
-		case s.Send <- msg:
-		default:
-			// 队列满则丢弃，避免慢客户端拖累广播
+		for _, s := range sessions {
+			select {
+			case s.Send <- msg:
+			default:
+				// 队列满则丢弃，避免慢客户端拖累广播
+			}
 		}
 	}
 }
@@ -186,7 +199,7 @@ func (m *Manager) SendToUsers(msg []byte, usernames []string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, uname := range usernames {
-		if s, ok := m.byUser[uname]; ok {
+		for _, s := range m.byUser[uname] {
 			select {
 			case s.Send <- msg:
 			default:
@@ -199,27 +212,33 @@ func (m *Manager) SendToUsers(msg []byte, usernames []string) {
 // 持有写锁直到 channel write 完成，避免并发 Shutdown 关闭 channel 导致 panic。
 func (m *Manager) Send(username string, msg []byte) bool {
 	m.mu.Lock()
-	s, ok := m.byUser[username]
-	if !ok {
+	sessions := m.byUser[username]
+	if len(sessions) == 0 {
 		m.mu.Unlock()
 		return false
 	}
-	select {
-	case s.Send <- msg:
-		m.mu.Unlock()
-		return true
-	default:
-		m.mu.Unlock()
-		return false
+	delivered := false
+	for _, s := range sessions {
+		select {
+		case s.Send <- msg:
+			delivered = true
+		default:
+		}
 	}
+	m.mu.Unlock()
+	return delivered
 }
 
-// UpdateHeartbeat 刷新用户心跳时间。
-func (m *Manager) UpdateHeartbeat(username string) {
+// UpdateHeartbeat 只刷新发来 pong/ping 的具体连接。
+// 一个客户端不能替同账号的另一个失联客户端续期。
+func (m *Manager) UpdateHeartbeat(target *Session) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if s, ok := m.byUser[username]; ok {
-		s.LastHeartbeat = time.Now()
+	for _, s := range m.byUser[target.Username] {
+		if s == target {
+			s.LastHeartbeat = time.Now()
+			return
+		}
 	}
 }
 
@@ -228,12 +247,33 @@ func (m *Manager) UpdateNickname(userID int64, nickname string) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	s, ok := m.byUserID[userID]
-	if !ok {
+	sessions := m.byUserID[userID]
+	if len(sessions) == 0 {
 		return false
 	}
-	s.Nickname = nickname
+	for _, s := range sessions {
+		s.Nickname = nickname
+	}
 	return true
+}
+
+// UpdateAvatar refreshes the public avatar copied into every active session.
+func (m *Manager) UpdateAvatar(userID int64, avatarURL string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	sessions := m.byUserID[userID]
+	if len(sessions) == 0 {
+		return false
+	}
+	for _, s := range sessions {
+		s.AvatarURL = avatarURL
+	}
+	return true
+}
+
+type ExpiredSession struct {
+	Session       *Session
+	BecameOffline bool
 }
 
 // ExpireIdleSessions removes sessions whose last heartbeat is older than timeout.
@@ -241,19 +281,49 @@ func (m *Manager) UpdateNickname(userID int64, nickname string) bool {
 // 这个方法给“后台清理器”使用，而不是给业务请求直接调用。
 // 设计上返回被淘汰的会话快照，让上层决定是否广播 offline 事件，
 // 避免 session 包反向依赖 protocol 或 transport 层。
-func (m *Manager) ExpireIdleSessions(now time.Time, timeout time.Duration) []*Session {
+func (m *Manager) ExpireIdleSessions(now time.Time, timeout time.Duration) []ExpiredSession {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	var expired []*Session
-	for username, s := range m.byUser {
-		if now.Sub(s.LastHeartbeat) <= timeout {
+	var expired []ExpiredSession
+	for username, sessions := range m.byUser {
+		remaining := make([]*Session, 0, len(sessions))
+		for _, s := range sessions {
+			if now.Sub(s.LastHeartbeat) <= timeout {
+				remaining = append(remaining, s)
+				continue
+			}
+			expired = append(expired, ExpiredSession{Session: s})
+		}
+		if len(remaining) > 0 {
+			m.byUser[username] = remaining
+			m.byUserID[remaining[0].UserID] = remaining
 			continue
 		}
 		delete(m.byUser, username)
-		delete(m.byUserID, s.UserID)
-		expired = append(expired, s)
+		if len(sessions) > 0 {
+			delete(m.byUserID, sessions[0].UserID)
+			for i := len(expired) - 1; i >= 0; i-- {
+				if expired[i].Session.Username == username {
+					expired[i].BecameOffline = true
+					break
+				}
+			}
+		}
 	}
 
 	return expired
+}
+
+func withoutSession(sessions []*Session, target *Session) ([]*Session, bool) {
+	remaining := make([]*Session, 0, len(sessions))
+	removed := false
+	for _, s := range sessions {
+		if s == target {
+			removed = true
+			continue
+		}
+		remaining = append(remaining, s)
+	}
+	return remaining, removed
 }

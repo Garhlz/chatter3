@@ -112,15 +112,20 @@ func (s *GroupService) CreateGroup(ctx context.Context, creatorUserID int64, cre
 	if err = tx.Commit(ctx); err != nil {
 		return nil, err
 	}
+	creatorAvatarURL := ""
+	if creatorSession := s.sessions.Get(creatorUsername); creatorSession != nil {
+		creatorAvatarURL = creatorSession.AvatarURL
+	}
 
 	return &protocolv2.Group{
 		GroupID:   row.GroupID,
 		GroupName: row.GroupName,
 		Creator: protocolv2.User{
-			UserID:   creatorUserID,
-			Username: creatorUsername,
-			Nickname: creatorNickname,
-			Online:   s.sessions.IsOnline(creatorUsername),
+			UserID:    creatorUserID,
+			Username:  creatorUsername,
+			Nickname:  creatorNickname,
+			AvatarURL: creatorAvatarURL,
+			Online:    s.sessions.IsOnline(creatorUsername),
 		},
 		MemberCount: memberCount,
 		CreatedAt:   row.CreatedAt.Time.UTC().Format("2006-01-02T15:04:05Z"),
@@ -144,10 +149,11 @@ func (s *GroupService) GetUserGroups(ctx context.Context, userID int64) ([]proto
 			GroupID:   r.GroupID,
 			GroupName: r.GroupName,
 			Creator: protocolv2.User{
-				UserID:   r.CreatorID,
-				Username: r.Username,
-				Nickname: r.Nickname,
-				Online:   s.sessions.IsOnline(r.Username),
+				UserID:    r.CreatorID,
+				Username:  r.Username,
+				Nickname:  r.Nickname,
+				AvatarURL: r.AvatarUrl,
+				Online:    s.sessions.IsOnline(r.Username),
 			},
 			MemberCount: len(members),
 			CreatedAt:   r.CreatedAt.Time.UTC().Format("2006-01-02T15:04:05Z"),
@@ -177,10 +183,11 @@ func (s *GroupService) GetGroupByIDForUser(ctx context.Context, userID, groupID 
 		GroupID:   row.GroupID,
 		GroupName: row.GroupName,
 		Creator: protocolv2.User{
-			UserID:   row.CreatorID,
-			Username: row.Username,
-			Nickname: row.Nickname,
-			Online:   s.sessions.IsOnline(row.Username),
+			UserID:    row.CreatorID,
+			Username:  row.Username,
+			Nickname:  row.Nickname,
+			AvatarURL: row.AvatarUrl,
+			Online:    s.sessions.IsOnline(row.Username),
 		},
 		MemberCount: len(members),
 		CreatedAt:   row.CreatedAt.Time.UTC().Format("2006-01-02T15:04:05Z"),
@@ -201,10 +208,11 @@ func (s *GroupService) GetGroupMembersForUser(ctx context.Context, userID, group
 	for _, r := range rows {
 		members = append(members, protocolv2.GroupMember{
 			User: protocolv2.User{
-				UserID:   r.UserID,
-				Username: r.Username,
-				Nickname: r.Nickname,
-				Online:   s.sessions.IsOnline(r.Username),
+				UserID:    r.UserID,
+				Username:  r.Username,
+				Nickname:  r.Nickname,
+				AvatarURL: r.AvatarUrl,
+				Online:    s.sessions.IsOnline(r.Username),
 			},
 			Role:     r.Role,
 			JoinedAt: r.JoinedAt.Time.UTC().Format("2006-01-02T15:04:05Z"),
@@ -257,10 +265,11 @@ func (s *GroupService) SendGroupMessage(ctx context.Context, sender *session.Ses
 		MessageID: row.MessageID,
 		Scope:     "group",
 		Sender: protocolv2.User{
-			UserID:   sender.UserID,
-			Username: sender.Username,
-			Nickname: sender.Nickname,
-			Online:   true,
+			UserID:    sender.UserID,
+			Username:  sender.Username,
+			Nickname:  sender.Nickname,
+			AvatarURL: sender.AvatarURL,
+			Online:    true,
 		},
 		GroupID:     groupID,
 		ContentType: "text",
@@ -308,10 +317,11 @@ func (s *GroupService) GetGroupHistory(ctx context.Context, userID, groupID int6
 			MessageID: r.MessageID,
 			Scope:     "group",
 			Sender: protocolv2.User{
-				UserID:   r.SenderID,
-				Username: r.Username,
-				Nickname: r.Nickname,
-				Online:   s.sessions.IsOnline(r.Username),
+				UserID:    r.SenderID,
+				Username:  r.Username,
+				Nickname:  r.Nickname,
+				AvatarURL: r.AvatarUrl,
+				Online:    s.sessions.IsOnline(r.Username),
 			},
 			GroupID:     groupID,
 			ContentType: msgTypeToString(r.MessageType),

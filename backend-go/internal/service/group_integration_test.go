@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
@@ -36,6 +37,7 @@ func TestGroupServiceIntegrationCreateSendHistory(t *testing.T) {
 	bobID := insertTestUser(t, pool, "grp_bob_"+suffix, "Bob")
 	carolID := insertTestUser(t, pool, "grp_carol_"+suffix, "Carol")
 	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM files WHERE message_id IN (SELECT message_id FROM messages WHERE sender_id IN ($1, $2, $3))`, aliceID, bobID, carolID)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM group_members WHERE group_id IN (SELECT group_id FROM groups WHERE creator_id IN ($1, $2, $3))`, aliceID, bobID, carolID)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM messages WHERE sender_id IN ($1, $2, $3)`, aliceID, bobID, carolID)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM groups WHERE creator_id IN ($1, $2, $3)`, aliceID, bobID, carolID)
@@ -103,6 +105,26 @@ func TestGroupServiceIntegrationCreateSendHistory(t *testing.T) {
 	}
 	if len(history) != 1 || history[0].Content != "hello group" {
 		t.Fatalf("unexpected group history: %#v", history)
+	}
+
+	// 群文件复用同一条群消息历史链路，但上传和下载都必须重新校验成员身份。
+	fileSvc := NewFileService(pool, queries, sessions, t.TempDir(), 1024*1024)
+	fileResult, err := fileSvc.SaveUpload(ctx, FileUploadInput{
+		SenderID: aliceID, SenderUsername: "grp_alice_" + suffix, SenderNickname: "Alice",
+		GroupID: group.GroupID, FileName: "group.txt", MIMEType: "text/plain",
+		Size: int64(len("group file")), Reader: bytes.NewBufferString("group file"),
+	})
+	if err != nil {
+		t.Fatalf("upload group file: %v", err)
+	}
+	if fileResult.Message.Scope != "group" || fileResult.Message.GroupID != group.GroupID {
+		t.Fatalf("unexpected group file message: %#v", fileResult.Message)
+	}
+	if _, err := fileSvc.GetDownload(ctx, bobID, fileResult.File.FileID); err != nil {
+		t.Fatalf("group member should download file: %v", err)
+	}
+	if _, err := fileSvc.GetDownload(ctx, carolID, fileResult.File.FileID); !errors.Is(err, ErrForbiddenFile) {
+		t.Fatalf("non-member should be forbidden, got %v", err)
 	}
 
 	// Non-member cannot send group message.

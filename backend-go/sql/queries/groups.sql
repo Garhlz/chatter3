@@ -10,14 +10,14 @@ ON CONFLICT (group_id, user_id) DO NOTHING;
 
 -- name: GetGroupByID :one
 SELECT g.group_id, g.group_name, g.creator_id, g.created_at,
-       u.username, u.nickname
+       u.username, u.nickname, u.avatar_url
 FROM groups g
 JOIN users u ON u.user_id = g.creator_id
 WHERE g.group_id = $1;
 
 -- name: GetUserGroups :many
 SELECT g.group_id, g.group_name, g.creator_id, g.created_at,
-       u.username, u.nickname
+       u.username, u.nickname, u.avatar_url
 FROM groups g
 JOIN group_members gm ON gm.group_id = g.group_id
 JOIN users u ON u.user_id = g.creator_id
@@ -25,7 +25,7 @@ WHERE gm.user_id = $1
 ORDER BY g.created_at DESC;
 
 -- name: GetGroupMembers :many
-SELECT u.user_id, u.username, u.nickname, gm.role, gm.joined_at
+SELECT u.user_id, u.username, u.nickname, u.avatar_url, gm.role, gm.joined_at
 FROM group_members gm
 JOIN users u ON u.user_id = gm.user_id
 WHERE gm.group_id = $1
@@ -47,7 +47,7 @@ RETURNING message_id, created_at;
 
 -- name: GetGroupHistory :many
 SELECT m.message_id, m.sender_id, m.content, m.message_type, m.created_at,
-       u.username, u.nickname,
+       u.username, u.nickname, u.avatar_url,
        f.file_id, f.file_name, f.stored_file_name, f.file_size, f.file_type
 FROM messages m
 JOIN users u ON u.user_id = m.sender_id

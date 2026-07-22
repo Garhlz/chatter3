@@ -118,10 +118,11 @@ func (s *UserService) Login(ctx context.Context, username, password string) (str
 	}
 
 	return token, &protocolv2.User{
-		UserID:   dbUser.UserID,
-		Username: dbUser.Username,
-		Nickname: dbUser.Nickname,
-		Online:   false,
+		UserID:    dbUser.UserID,
+		Username:  dbUser.Username,
+		Nickname:  dbUser.Nickname,
+		AvatarURL: dbUser.AvatarUrl,
+		Online:    false,
 	}, nil
 }
 
@@ -143,10 +144,12 @@ func (s *UserService) GetUserProfile(ctx context.Context, username string, calle
 				Username:  row.Username,
 				Nickname:  row.Nickname,
 				AvatarURL: row.AvatarUrl,
+				Online:    s.isOnline(row.Username),
 			},
-			Bio:       row.Bio,
-			Gender:    row.Gender,
-			CreatedAt: row.CreatedAt.Time.UTC().Format("2006-01-02T15:04:05Z"),
+			BackgroundURL: row.BackgroundUrl,
+			Bio:           row.Bio,
+			Gender:        row.Gender,
+			CreatedAt:     row.CreatedAt.Time.UTC().Format("2006-01-02T15:04:05Z"),
 		},
 	}
 	if row.UserID == callerUserID && row.Email != nil {
@@ -209,13 +212,24 @@ func (s *UserService) UpdateUserProfile(ctx context.Context, userID int64, req *
 				Username:  row.Username,
 				Nickname:  row.Nickname,
 				AvatarURL: row.AvatarUrl,
+				Online:    s.isOnline(row.Username),
 			},
-			Bio:       row.Bio,
-			Gender:    row.Gender,
-			CreatedAt: row.CreatedAt.Time.UTC().Format("2006-01-02T15:04:05Z"),
+			BackgroundURL: row.BackgroundUrl,
+			Bio:           row.Bio,
+			Gender:        row.Gender,
+			CreatedAt:     row.CreatedAt.Time.UTC().Format("2006-01-02T15:04:05Z"),
 		},
 		Email: stringOrEmpty(row.Email),
 	}, nil
+}
+
+// GetPublicProfile returns the public portion used by realtime profile events.
+func (s *UserService) GetPublicProfile(ctx context.Context, username string) (*protocolv2.UserProfile, error) {
+	profile, err := s.GetUserProfile(ctx, username, -1)
+	if err != nil {
+		return nil, err
+	}
+	return &profile.UserProfile, nil
 }
 
 // GetIdentity returns the latest persisted public identity for a user.
@@ -233,8 +247,15 @@ func (s *UserService) GetIdentity(ctx context.Context, userID int64) (*protocolv
 		Username:  row.Username,
 		Nickname:  row.Nickname,
 		AvatarURL: row.AvatarUrl,
-		Online:    false,
+		Online:    s.isOnline(row.Username),
 	}, nil
+}
+
+// isOnline 把会话管理器作为在线状态的唯一事实来源。
+// 数据库只保存用户资料，并不知道某个 WebSocket 此刻是否仍然连接；
+// 因此不能依赖查询结果中的默认 bool 值来展示在线状态。
+func (s *UserService) isOnline(username string) bool {
+	return s.sessions != nil && s.sessions.IsOnline(username)
 }
 
 func stringOrEmpty(s *string) string {

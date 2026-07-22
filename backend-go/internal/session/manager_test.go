@@ -5,18 +5,13 @@ import (
 	"time"
 )
 
-func TestRegisterClosesPreviousSession(t *testing.T) {
+func TestRegisterKeepsMultipleSessionsForSameUser(t *testing.T) {
 	manager := NewManager()
 
-	closed := false
 	first := &Session{
 		UserID:   1,
 		Username: "alice",
 		Send:     make(chan []byte, 1),
-		Close: func() error {
-			closed = true
-			return nil
-		},
 	}
 	second := &Session{
 		UserID:   1,
@@ -24,18 +19,25 @@ func TestRegisterClosesPreviousSession(t *testing.T) {
 		Send:     make(chan []byte, 1),
 	}
 
-	manager.Register(first)
-	manager.Register(second)
-
-	if !closed {
-		t.Fatalf("expected previous session close hook to be called")
+	if firstConnection := manager.Register(first); !firstConnection {
+		t.Fatalf("expected first connection to make user online")
 	}
+	if firstConnection := manager.Register(second); firstConnection {
+		t.Fatalf("expected second connection to keep existing online state")
+	}
+
 	if got := manager.Get("alice"); got != second {
-		t.Fatalf("expected replacement session to be current, got %#v", got)
+		t.Fatalf("expected most recently registered session, got %#v", got)
+	}
+	if !manager.Send("alice", []byte("hello")) {
+		t.Fatalf("expected send to reach active sessions")
+	}
+	if string(<-first.Send) != "hello" || string(<-second.Send) != "hello" {
+		t.Fatalf("expected both sessions to receive the message")
 	}
 }
 
-func TestRemoveSessionDoesNotRemoveReplacement(t *testing.T) {
+func TestRemoveSessionKeepsUserOnlineWhileAnotherSessionRemains(t *testing.T) {
 	manager := NewManager()
 
 	first := &Session{
@@ -51,13 +53,13 @@ func TestRemoveSessionDoesNotRemoveReplacement(t *testing.T) {
 
 	manager.Register(first)
 	manager.Register(second)
-	removed := manager.RemoveSession(first)
+	becameOffline := manager.RemoveSession(first)
 
-	if removed {
-		t.Fatalf("expected replaced session not to be removed")
+	if becameOffline {
+		t.Fatalf("expected user to remain online")
 	}
 	if got := manager.Get("alice"); got != second {
-		t.Fatalf("expected replacement session to remain registered, got %#v", got)
+		t.Fatalf("expected second active session to remain registered, got %#v", got)
 	}
 }
 
@@ -100,7 +102,7 @@ func TestExpireIdleSessionsRemovesOnlyTimedOutOnes(t *testing.T) {
 	manager.Register(fresh)
 
 	expired := manager.ExpireIdleSessions(now, 30*time.Second)
-	if len(expired) != 1 || expired[0] != stale {
+	if len(expired) != 1 || expired[0].Session != stale || !expired[0].BecameOffline {
 		t.Fatalf("expected only stale session to expire, got %#v", expired)
 	}
 	if manager.Get("stale") != nil {
@@ -108,6 +110,23 @@ func TestExpireIdleSessionsRemovesOnlyTimedOutOnes(t *testing.T) {
 	}
 	if manager.Get("fresh") != fresh {
 		t.Fatalf("expected fresh session to remain registered")
+	}
+}
+
+func TestExpireIdleSessionDoesNotOfflineAnotherConnection(t *testing.T) {
+	manager := NewManager()
+	now := time.Date(2026, 5, 15, 10, 0, 0, 0, time.UTC)
+	stale := &Session{UserID: 1, Username: "alice", LastHeartbeat: now.Add(-2 * time.Minute), Send: make(chan []byte, 1)}
+	fresh := &Session{UserID: 1, Username: "alice", LastHeartbeat: now.Add(-5 * time.Second), Send: make(chan []byte, 1)}
+	manager.Register(stale)
+	manager.Register(fresh)
+
+	expired := manager.ExpireIdleSessions(now, 30*time.Second)
+	if len(expired) != 1 || expired[0].Session != stale || expired[0].BecameOffline {
+		t.Fatalf("expected only stale connection without offline transition, got %#v", expired)
+	}
+	if manager.Get("alice") != fresh || !manager.IsOnline("alice") {
+		t.Fatalf("expected fresh connection to keep alice online")
 	}
 }
 

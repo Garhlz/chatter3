@@ -24,12 +24,12 @@
 
 - HTTP 认证：`POST /api/v2/auth/register`、`POST /api/v2/auth/login`
 - HTTP 历史与在线列表：`GET /api/v2/users/online`、公共历史、私聊历史
-- HTTP 用户资料：读取任意用户公开资料、更新本人资料
+- HTTP 用户资料：读取任意用户公开资料、更新本人资料、头像和个人背景
 - WebSocket 鉴权：`GET /api/v2/ws?token=<token>`
 - WebSocket 会话事件：`session.ready`、`session.ping`、`session.pong`
 - WebSocket 在线事件：`presence.online`、`presence.offline`
 - WebSocket 文本聊天：`chat.public.send`、`chat.private.send`、`chat.group.send` 及对应 message 事件
-- 文件上传下载：`POST /api/v2/files/upload`、`GET /api/v2/files/{fileId}`
+- 文件上传下载：公共、私聊和群聊文件上传，以及按会话权限下载
 - 群聊：`POST /api/v2/groups`、群组列表、成员管理、群历史
 - 文本消息输入约束和错误码集合
 
@@ -37,7 +37,7 @@
 
 - 已读回执
 - 撤回
-- 多端同步策略
+- 已读状态等完整多端同步策略（同账号多连接和实时消息投递已支持）
 - 推送通知
 
 因此，当前前后端可以围绕”认证、历史、在线状态、文本聊天、文件、群聊”继续并行开发。
@@ -167,6 +167,7 @@
     "online": true
     },
     "bio": "Hello",
+    "backgroundUrl": "/api/v2/profile-media/1-background-opaque.jpg",
     "gender": 0,
     "createdAt": "2026-05-15T12:00:00Z",
     "email": "alice@example.com"
@@ -189,6 +190,15 @@
 
 成功响应与读取本人资料相同。更新其他用户返回 `forbidden`。
 
+资料 JSON 更新只覆盖昵称、自我介绍、邮箱和性别。资料图片使用独立 multipart 接口：
+
+- `PUT /api/v2/users/{username}/avatar`
+- `PUT /api/v2/users/{username}/background`
+
+两者的表单字段均为 `file`，只允许修改本人，支持 JPEG/PNG，最大 5 MiB。
+成功响应与读取本人资料相同。服务端返回的 `/api/v2/profile-media/...` 地址可公开读取，
+使用不可预测文件名并设置长期缓存；资料查询本身仍然要求登录。
+
 #### `GET /api/v2/chats/public/history?limit=50&cursor=...`
 
 返回公共聊天历史。
@@ -206,20 +216,25 @@
 - 表单字段：
   - `file`
   - `receiverUsername`（可选）
+  - `groupID`（可选）
 
 行为：
 
-- 不带 `receiverUsername` 时，创建公共文件消息
-- 带 `receiverUsername` 时，创建私聊文件消息
+- 两个目标字段都不带时，创建公共文件消息
+- 只带 `receiverUsername` 时，创建私聊文件消息
+- 只带 `groupID` 时，创建群文件消息，发送者必须是群成员
+- `receiverUsername` 与 `groupID` 同时出现时返回 `bad_request`
 - 若 `receiverUsername` 不存在，返回 `not_found`
 - 上传成功后返回统一的文件元数据结构
 - 同时沿用现有实时消息事件：
   - 公共上传 -> `chat.public.message`
   - 私聊上传 -> `chat.private.message`
+  - 群聊上传 -> `chat.group.message`
 
 #### `GET /api/v2/files/{fileId}`
 
-下载文件，权限规则由服务端校验发送者/接收者关系。
+下载文件时按消息范围鉴权：公共文件允许登录用户下载，私聊文件仅允许发送者和接收者，
+群文件仅允许当前仍在群内的成员。
 
 文件元数据说明：
 
@@ -299,7 +314,8 @@
 }
 ```
 
-成功后返回本次加入的成员结构数组：
+成功后返回该群的完整成员结构数组。前端可以直接用响应替换本地成员列表，
+无需在添加成功后再发起一次刷新请求：
 
 ```json
 {
@@ -506,6 +522,30 @@
 - `presence.online`
 - `presence.offline`
 
+同一账号允许建立多条 WebSocket 连接。只有第一条连接建立时发送 online，最后一条
+连接关闭或超时时发送 offline；实时消息会投递到该用户的所有活跃连接。
+
+#### 用户资料变化事件
+
+昵称、自我介绍、性别、头像或背景更新后广播 `user.profile.changed`：
+
+```json
+{
+  "event": "user.profile.changed",
+  "payload": {
+    "profile": {
+      "user": { "userId": 1, "username": "alice", "nickname": "Alice", "online": true },
+      "backgroundUrl": "/api/v2/profile-media/1-background-opaque.jpg",
+      "bio": "Hello",
+      "gender": 0,
+      "createdAt": "2026-05-15T12:00:00Z"
+    }
+  }
+}
+```
+
+该事件只包含公开资料，不包含本人私有的 `email`。
+
 #### 心跳响应
 
 - `session.pong`
@@ -552,6 +592,8 @@
 - 上传大小受服务端 `MAX_FILE_SIZE_MB` 限制
 - 私聊文件不允许把 `receiverUsername` 指向自己
 - 私聊文件目标用户不存在时返回 `not_found`
+- 群文件发送者必须是群成员，下载者也必须仍是群成员
+- `receiverUsername` 和 `groupID` 互斥
 
 ## 4. 核心资源结构
 
@@ -651,5 +693,5 @@ v2 当前已冻结以下能力：
 
 - 已读回执
 - 撤回
-- 多端同步策略
+- 已读状态等完整多端同步策略
 - 推送通知

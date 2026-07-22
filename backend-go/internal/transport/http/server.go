@@ -8,8 +8,9 @@
 //	GET  /api/v2/chats/public/history         [auth required]
 //	GET  /api/v2/chats/private/{username}/history  [auth required]
 //	GET  /api/v2/ws                  — WebSocket upgrade  [auth via ?token=]
-//	POST /api/v2/files/upload        [501 until P6]
-//	GET  /api/v2/files/{fileID}      [501 until P6]
+//	POST /api/v2/files/upload        — public/private/group file message
+//	GET  /api/v2/files/{fileID}      — permission-checked download
+//	PUT  /api/v2/users/{username}/avatar|background — profile media
 package http
 
 import (
@@ -46,14 +47,15 @@ const claimsKey contextKey = iota
 
 // Server encapsulates the HTTP server and all its dependencies.
 type Server struct {
-	cfg      *config.Config
-	server   *http.Server
-	sessions *session.Manager
-	jwtSvc   *auth.JWTService
-	userSvc  *appsvc.UserService
-	msgSvc   *appsvc.MessageService
-	fileSvc  *appsvc.FileService
-	groupSvc *appsvc.GroupService
+	cfg             *config.Config
+	server          *http.Server
+	sessions        *session.Manager
+	jwtSvc          *auth.JWTService
+	userSvc         *appsvc.UserService
+	msgSvc          *appsvc.MessageService
+	fileSvc         *appsvc.FileService
+	profileMediaSvc *appsvc.ProfileMediaService
+	groupSvc        *appsvc.GroupService
 }
 
 // NewServer wires up all routes and dependencies.
@@ -79,16 +81,18 @@ func NewServer(
 	userSvc := appsvc.NewUserService(queries, jwtSvc, sessions)
 	msgSvc := appsvc.NewMessageService(queries, sessions)
 	fileSvc := appsvc.NewFileService(pool, queries, sessions, cfg.UploadDir, cfg.MaxFileSize)
+	profileMediaSvc := appsvc.NewProfileMediaService(queries, sessions, cfg.UploadDir)
 	groupSvc := appsvc.NewGroupService(pool, queries, sessions)
 
 	s := &Server{
-		cfg:      cfg,
-		sessions: sessions,
-		jwtSvc:   jwtSvc,
-		userSvc:  userSvc,
-		msgSvc:   msgSvc,
-		fileSvc:  fileSvc,
-		groupSvc: groupSvc,
+		cfg:             cfg,
+		sessions:        sessions,
+		jwtSvc:          jwtSvc,
+		userSvc:         userSvc,
+		msgSvc:          msgSvc,
+		fileSvc:         fileSvc,
+		profileMediaSvc: profileMediaSvc,
+		groupSvc:        groupSvc,
 	}
 
 	mux := http.NewServeMux()
@@ -104,6 +108,9 @@ func NewServer(
 	mux.HandleFunc("GET /api/v2/users/online", s.auth(s.handleV2OnlineUsers))
 	mux.HandleFunc("GET /api/v2/users/{username}/profile", s.auth(s.handleV2GetProfile))
 	mux.HandleFunc("PUT /api/v2/users/{username}/profile", s.auth(s.handleV2UpdateProfile))
+	mux.HandleFunc("PUT /api/v2/users/{username}/avatar", s.auth(s.handleV2UpdateProfileImage))
+	mux.HandleFunc("PUT /api/v2/users/{username}/background", s.auth(s.handleV2UpdateProfileImage))
+	mux.HandleFunc("GET /api/v2/profile-media/{fileName}", s.handleV2ProfileMedia)
 	mux.HandleFunc("GET /api/v2/chats/public/history", s.auth(s.handleV2PublicHistory))
 	mux.HandleFunc("GET /api/v2/chats/private/{username}/history", s.auth(s.handleV2PrivateHistory))
 
@@ -170,8 +177,12 @@ func (s *Server) reapIdleSessions(ctx context.Context) {
 			return
 		case now := <-ticker.C:
 			expired := s.sessions.ExpireIdleSessions(now, s.cfg.HeartbeatTimeout)
-			for _, sess := range expired {
+			for _, item := range expired {
+				sess := item.Session
 				sess.Shutdown()
+				if !item.BecameOffline {
+					continue
+				}
 				s.sessions.Broadcast(eventJSON("presence.offline", "", protocolv2.PresencePayload{
 					User: protocolv2.User{
 						UserID:   sess.UserID,
@@ -280,10 +291,11 @@ func (s *Server) handleV2OnlineUsers(w http.ResponseWriter, r *http.Request) {
 	users := make([]protocolv2.User, 0, len(snapshots))
 	for _, sess := range snapshots {
 		users = append(users, protocolv2.User{
-			UserID:   sess.UserID,
-			Username: sess.Username,
-			Nickname: sess.Nickname,
-			Online:   sess.Online,
+			UserID:    sess.UserID,
+			Username:  sess.Username,
+			Nickname:  sess.Nickname,
+			AvatarURL: sess.AvatarURL,
+			Online:    sess.Online,
 		})
 	}
 
@@ -331,7 +343,83 @@ func (s *Server) handleV2UpdateProfile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
+	s.broadcastProfileChanged(profile.UserProfile)
 	writeJSON(w, http.StatusOK, protocolv2.APIResponse[*protocolv2.OwnProfile]{Data: profile})
+}
+
+func (s *Server) handleV2UpdateProfileImage(w http.ResponseWriter, r *http.Request) {
+	username := r.PathValue("username")
+	claims := claimsFrom(r)
+	if claims == nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "token required")
+		return
+	}
+	if claims.Username != username {
+		writeError(w, http.StatusForbidden, "forbidden", "can only update your own profile")
+		return
+	}
+
+	kind := "background"
+	if strings.HasSuffix(r.URL.Path, "/avatar") {
+		kind = "avatar"
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, appsvc.MaxProfileImageSize+(1<<20))
+	if err := r.ParseMultipartForm(appsvc.MaxProfileImageSize + (1 << 20)); err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "invalid multipart form")
+		return
+	}
+	file, _, err := r.FormFile("file")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "file is required")
+		return
+	}
+	defer file.Close()
+
+	_, err = s.profileMediaSvc.Save(r.Context(), appsvc.ProfileImageInput{
+		UserID: claims.UserID,
+		Kind:   kind,
+		Reader: file,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, appsvc.ErrProfileImageTooLarge):
+			writeError(w, http.StatusRequestEntityTooLarge, "payload_too_large", err.Error())
+		case errors.Is(err, appsvc.ErrInvalidProfileImage), errors.Is(err, appsvc.ErrInvalidProfileImageKind):
+			writeError(w, http.StatusBadRequest, "bad_request", err.Error())
+		default:
+			writeError(w, http.StatusInternalServerError, "internal_error", "failed to update profile image")
+		}
+		return
+	}
+
+	profile, err := s.userSvc.GetUserProfile(r.Context(), username, claims.UserID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", "failed to reload profile")
+		return
+	}
+	s.broadcastProfileChanged(profile.UserProfile)
+	writeJSON(w, http.StatusOK, protocolv2.APIResponse[*protocolv2.OwnProfile]{Data: profile})
+}
+
+func (s *Server) handleV2ProfileMedia(w http.ResponseWriter, r *http.Request) {
+	path, err := s.profileMediaSvc.Path(r.PathValue("fileName"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "bad_request", "invalid profile media path")
+		return
+	}
+	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+		writeError(w, http.StatusNotFound, "not_found", "profile media not found")
+		return
+	}
+	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	http.ServeFile(w, r, path)
+}
+
+func (s *Server) broadcastProfileChanged(profile protocolv2.UserProfile) {
+	s.sessions.Broadcast(eventJSON("user.profile.changed", "", protocolv2.ProfileChangedPayload{
+		Profile: profile,
+	}), "")
 }
 
 // handleV2PublicHistory returns a cursor-paginated page of lobby messages.
@@ -429,38 +517,42 @@ func (s *Server) handleV2WebSocket(w http.ResponseWriter, r *http.Request) {
 		UserID:        identity.UserID,
 		Username:      identity.Username,
 		Nickname:      identity.Nickname,
+		AvatarURL:     identity.AvatarURL,
 		LastHeartbeat: time.Now(),
 		Close:         ws.close,
 		Send:          make(chan []byte, 32),
 	}
 
-	s.sessions.Register(sess)
+	becameOnline := s.sessions.Register(sess)
 	// 上线通知只发给其他会话，避免自己收到一条“自己刚上线”的冗余事件。
-	s.sessions.Broadcast(eventJSON("presence.online", "", protocolv2.PresencePayload{
-		User: protocolv2.User{
-			UserID:   sess.UserID,
-			Username: sess.Username,
-			Nickname: sess.Nickname,
-			Online:   true,
-		},
-	}), sess.Username)
+	if becameOnline {
+		s.sessions.Broadcast(eventJSON("presence.online", "", protocolv2.PresencePayload{
+			User: protocolv2.User{
+				UserID:    sess.UserID,
+				Username:  sess.Username,
+				Nickname:  sess.Nickname,
+				AvatarURL: sess.AvatarURL,
+				Online:    true,
+			},
+		}), sess.Username)
+	}
 	defer func() {
 		// 先把会话从 manager 移除，再关闭 send channel。
 		// 否则其他 goroutine 仍可能通过 manager 找到这个 session，
 		// 向已关闭的 channel 发送数据并触发 panic。
-		removedCurrentSession := s.sessions.RemoveSession(sess)
+		becameOffline := s.sessions.RemoveSession(sess)
 		sess.Shutdown()
-		if !removedCurrentSession {
-			// 同一用户重连时，新 session 已经替换旧 session。
-			// 此时旧连接退出不代表用户离线，不能广播 presence.offline。
+		if !becameOffline {
+			// 同一用户仍有 Web 或桌面连接时，不能广播 presence.offline。
 			return
 		}
 		s.sessions.Broadcast(eventJSON("presence.offline", "", protocolv2.PresencePayload{
 			User: protocolv2.User{
-				UserID:   sess.UserID,
-				Username: sess.Username,
-				Nickname: sess.Nickname,
-				Online:   false,
+				UserID:    sess.UserID,
+				Username:  sess.Username,
+				Nickname:  sess.Nickname,
+				AvatarURL: sess.AvatarURL,
+				Online:    false,
 			},
 		}), sess.Username)
 	}()
@@ -470,10 +562,11 @@ func (s *Server) handleV2WebSocket(w http.ResponseWriter, r *http.Request) {
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 		Payload: protocolv2.ReadyPayload{
 			User: protocolv2.User{
-				UserID:   sess.UserID,
-				Username: sess.Username,
-				Nickname: sess.Nickname,
-				Online:   true,
+				UserID:    sess.UserID,
+				Username:  sess.Username,
+				Nickname:  sess.Nickname,
+				AvatarURL: sess.AvatarURL,
+				Online:    true,
 			},
 			HeartbeatTimeout: s.cfg.HeartbeatTimeout.String(),
 		},
@@ -516,7 +609,7 @@ func (s *Server) handleV2WebSocket(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		case wsOpcodePong:
-			s.sessions.UpdateHeartbeat(sess.Username)
+			s.sessions.UpdateHeartbeat(sess)
 		case wsOpcodeText:
 			var in wsInboundEvent
 			if err := json.Unmarshal(payload, &in); err != nil {
@@ -526,7 +619,7 @@ func (s *Server) handleV2WebSocket(w http.ResponseWriter, r *http.Request) {
 
 			switch in.Event {
 			case "session.ping":
-				s.sessions.UpdateHeartbeat(sess.Username)
+				s.sessions.UpdateHeartbeat(sess)
 				if err := ws.writeJSON(protocolv2.Event[protocolv2.PongPayload]{
 					Event:     "session.pong",
 					RequestID: in.RequestID,
@@ -615,11 +708,22 @@ func (s *Server) handleV2Upload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
+	var groupID int64
+	if rawGroupID := strings.TrimSpace(r.FormValue("groupID")); rawGroupID != "" {
+		groupID, err = strconv.ParseInt(rawGroupID, 10, 64)
+		if err != nil || groupID <= 0 {
+			writeError(w, http.StatusBadRequest, "bad_request", "invalid groupID")
+			return
+		}
+	}
+
 	result, err := s.fileSvc.SaveUpload(r.Context(), appsvc.FileUploadInput{
 		SenderID:         identity.UserID,
 		SenderUsername:   identity.Username,
 		SenderNickname:   identity.Nickname,
+		SenderAvatarURL:  identity.AvatarURL,
 		ReceiverUsername: r.FormValue("receiverUsername"),
+		GroupID:          groupID,
 		FileName:         header.Filename,
 		MIMEType:         header.Header.Get("Content-Type"),
 		Size:             header.Size,
@@ -629,14 +733,18 @@ func (s *Server) handleV2Upload(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case errors.Is(err, appsvc.ErrFileRequired),
 			errors.Is(err, appsvc.ErrReceiverRequired),
-			errors.Is(err, appsvc.ErrCannotMessageSelf):
+			errors.Is(err, appsvc.ErrCannotMessageSelf),
+			errors.Is(err, appsvc.ErrInvalidFileTarget):
 			writeError(w, http.StatusBadRequest, "bad_request", err.Error())
 			return
 		case errors.Is(err, appsvc.ErrFileTooLarge):
 			writeError(w, http.StatusRequestEntityTooLarge, "payload_too_large", "file is too large")
 			return
 		case errors.Is(err, repository.ErrNotFound):
-			writeError(w, http.StatusNotFound, "not_found", "user not found")
+			writeError(w, http.StatusNotFound, "not_found", "upload target not found")
+			return
+		case errors.Is(err, appsvc.ErrNotGroupMember):
+			writeError(w, http.StatusForbidden, "forbidden", "not a group member")
 			return
 		default:
 			slog.Error("file upload failed", "err", err)
@@ -645,7 +753,12 @@ func (s *Server) handleV2Upload(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if result.ReceiverUsername == "" {
+	if result.GroupID > 0 {
+		s.sessions.SendToUsers(
+			eventJSON("chat.group.message", "", result.Message),
+			result.GroupUsernames,
+		)
+	} else if result.ReceiverUsername == "" {
 		s.sessions.Broadcast(eventJSON("chat.public.message", "", result.Message), "")
 	} else {
 		body := eventJSON("chat.private.message", "", result.Message)
