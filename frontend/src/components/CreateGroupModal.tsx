@@ -1,6 +1,8 @@
+import { X } from "lucide-react";
 import { t } from "../i18n";
 import { useChatStore } from "../store/chatStore";
 import { useState } from "react";
+import { IconButton } from "./ui/IconButton";
 
 export function CreateGroupModal({ onClose }: { onClose: () => void }) {
   const language = useChatStore((state) => state.language);
@@ -29,6 +31,9 @@ export function CreateGroupModal({ onClose }: { onClose: () => void }) {
     <div className="modal-overlay" onClick={onClose}>
       <div
         className="modal-panel"
+        role="dialog"
+        aria-modal="true"
+        aria-label={t(language, "modal.groupTitle")}
         onClick={(e) => e.stopPropagation()}
       >
         <header className="panel-header">
@@ -36,13 +41,7 @@ export function CreateGroupModal({ onClose }: { onClose: () => void }) {
             <p className="section-label">{t(language, "modal.groupTitle")}</p>
             <h2>{t(language, "modal.createGroup")}</h2>
           </div>
-          <button
-            type="button"
-            className="secondary-button compact-button"
-            onClick={onClose}
-          >
-            ×
-          </button>
+          <IconButton icon={X} label={t(language, "feedback.dismiss")} onClick={onClose} />
         </header>
 
         <div className="modal-body">

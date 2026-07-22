@@ -1,0 +1,153 @@
+@media (max-width: 1100px) {
+  :root {
+    --sidebar-width: 272px;
+  }
+
+  .timeline-column,
+  .composer-row,
+  .composer-feedback,
+  .upload-chip {
+    width: 100%;
+  }
+}
+
+/*
+ * 820px 以下不再同时挤压侧栏和消息区：侧栏变成覆盖层。
+ * 桌面窗口仍可缩窄，但聊天区会保留足够的阅读和输入宽度。
+ */
+@media (max-width: 819px) {
+  :root {
+    --sidebar-width: 292px;
+  }
+
+  .app-shell {
+    display: block;
+  }
+
+  .app-sidebar.is-overlay {
+    position: fixed;
+    z-index: 60;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: min(var(--sidebar-width), calc(100vw - 72px));
+    border-right: 1px solid var(--color-border);
+    box-shadow: var(--shadow-floating);
+    transform: translateX(-105%);
+    transition: transform 180ms ease;
+  }
+
+  .app-sidebar.is-overlay.is-open {
+    transform: translateX(0);
+  }
+
+  .sidebar-backdrop {
+    position: fixed;
+    z-index: 55;
+    inset: 0;
+    display: block;
+    background: var(--color-overlay);
+  }
+
+  .mobile-sidebar-trigger {
+    position: fixed;
+    z-index: 10;
+    top: 16px;
+    left: 12px;
+    display: inline-grid;
+  }
+
+  .chat-header {
+    padding-right: 12px;
+    padding-left: 56px;
+  }
+
+  .chat-header .connection-indicator span,
+  .failed-message-count {
+    display: none;
+  }
+
+  .timeline-column {
+    padding-right: 14px;
+    padding-left: 14px;
+  }
+
+  .composer-row {
+    padding-right: 12px;
+    padding-left: 12px;
+  }
+
+  .composer-feedback,
+  .upload-chip {
+    padding-right: 12px;
+    padding-left: 12px;
+  }
+}
+
+@media (max-width: 680px) {
+  body {
+    min-width: 360px;
+  }
+
+  .message-group-content {
+    max-width: 82%;
+  }
+
+  .send-button {
+    width: 40px;
+    padding: 0;
+  }
+
+  .send-button span {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+  }
+
+  .auth-overlay {
+    padding: 14px;
+  }
+
+  .auth-form-card {
+    grid-template-columns: 1fr;
+  }
+
+  .auth-card-hero {
+    min-height: auto;
+    padding: 28px;
+  }
+
+  .auth-panel-forms {
+    padding: 0;
+  }
+
+  .auth-form-card > .form-block {
+    padding: 28px;
+  }
+
+  .settings-row {
+    grid-template-columns: 1fr;
+    gap: 7px;
+  }
+
+  .modal-overlay {
+    padding: 12px;
+  }
+
+  .image-lightbox {
+    padding: 50px 14px 20px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

@@ -1,6 +1,8 @@
+import { X } from "lucide-react";
 import { useState } from "react";
 import { t } from "../i18n";
 import { useChatStore } from "../store/chatStore";
+import { IconButton } from "./ui/IconButton";
 
 export function GroupPanel({
   onProfileOpen,
@@ -102,14 +104,11 @@ export function GroupPanel({
           )}
         </div>
         {mode === "drawer" && onClose ? (
-          <button
-            type="button"
-            className="secondary-button compact-button"
+          <IconButton
+            icon={X}
+            label={t(language, "chat.closeDetails")}
             onClick={onClose}
-            aria-label={t(language, "chat.closeDetails")}
-          >
-            ×
-          </button>
+          />
         ) : null}
       </header>
 
@@ -195,13 +194,12 @@ export function GroupPanel({
           {memberActionError && (
             <div className="callout error" role="alert">
               <span>{memberActionError}</span>
-              <button
-                type="button"
-                className="compact-button"
+              <IconButton
+                icon={X}
+                label={t(language, "feedback.dismiss")}
+                size="small"
                 onClick={() => setMemberActionError("")}
-              >
-                ×
-              </button>
+              />
             </div>
           )}
           <input

@@ -165,7 +165,7 @@ export function createAPIClient(baseURL: string) {
       groupID: number,
       payload: AddGroupMemberRequest,
     ) =>
-      request<void>(
+      request<GroupMember[]>(
         `/api/v2/groups/${groupID}/members`,
         "POST",
         payload,

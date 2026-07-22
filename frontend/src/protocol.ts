@@ -16,6 +16,7 @@ export type CurrentUser = {
   userId: number;
   username: string;
   nickname: string;
+  avatarUrl?: string;
   online?: boolean;
 };
 
@@ -23,6 +24,7 @@ export type OnlineUser = {
   userId: number;
   username: string;
   nickname: string;
+  avatarUrl?: string;
   online: boolean;
 };
 
@@ -69,6 +71,11 @@ export type Group = {
   creator: CurrentUser;
   memberCount: number;
   createdAt: string;
+};
+
+export type GroupChangedPayload = {
+  group: Group;
+  removedUsername?: string;
 };
 
 export type GroupMember = {

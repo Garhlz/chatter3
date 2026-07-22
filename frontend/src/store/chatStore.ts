@@ -40,6 +40,7 @@ import type {
   ChatMessage,
   CurrentUser,
   Group,
+  GroupChangedPayload,
   GroupMember,
   LoginRequest,
   OnlineUser,
@@ -58,6 +59,7 @@ import {
   privateConversation,
   publicConversation,
   publicConversationId,
+  sortedConversationList,
 } from "./helpers";
 import type { ChatMessageView, Conversation, ConversationScope, HistoryView } from "./helpers";
 
@@ -83,7 +85,7 @@ type ChatState = {
   lastSelectedFile: string;
   historyTarget: string;
   onlineUsers: OnlineUser[];
-  draft: string;
+  draftsByConversation: Record<string, string>;
   groups: Group[];
   newGroupName: string;
   newGroupMembers: string;
@@ -397,12 +399,15 @@ function buildSessionConversations(
   publicMessages: ChatMessageView[],
   users: OnlineUser[],
   groups: Group[],
+  currentUsername: string,
   archivedConversations?: Record<string, Conversation>,
 ) {
   const conversations: Record<string, Conversation> = {
     [publicConversationId]: publicConversation(publicMessages),
   };
   for (const user of users) {
+    // 在线用户接口包含自己是合理的，但会话导航不应该因此生成“和自己私聊”。
+    if (user.username === currentUsername) continue;
     conversations[conversationIdFor("private", user.username)] =
       privateConversation(user.username, user.online, user.nickname);
   }
@@ -410,7 +415,10 @@ function buildSessionConversations(
     conversations[conversationIdFor("group", String(group.groupID))] =
       groupConversation(group);
   }
-  return mergeConversationState(conversations, archivedConversations);
+  const merged = mergeConversationState(conversations, archivedConversations);
+  // 旧版本可能已经把自己的私聊写进本地归档，因此恢复时也要清理一次。
+  delete merged[conversationIdFor("private", currentUsername)];
+  return merged;
 }
 
 function buildSessionStateFromServer(
@@ -418,16 +426,19 @@ function buildSessionStateFromServer(
   publicHistoryCursor: string | undefined,
   users: OnlineUser[],
   groups: Group[],
+  currentUsername: string,
   archivedState?: ReturnType<typeof restoreChatArchiveSnapshot>,
 ) {
-  const messagesByConversation = {
+  const messagesByConversation: Record<string, ChatMessageView[]> = {
     ...(archivedState?.messagesByConversation ?? {}),
     [publicConversationId]: publicMessages,
   };
+  delete messagesByConversation[conversationIdFor("private", currentUsername)];
   const conversations = buildSessionConversations(
     publicMessages,
     users,
     groups,
+    currentUsername,
     archivedState?.conversations,
   );
   const historyCursors = {
@@ -447,7 +458,7 @@ function buildSessionStateFromServer(
     conversations,
     scrollPositions: archivedState?.scrollPositions ?? {},
     historyTarget: archivedState?.historyTarget ?? "",
-    onlineUsers: users,
+    onlineUsers: users.filter((user) => user.username !== currentUsername),
     groups,
   };
 }
@@ -562,11 +573,22 @@ function connectionHandlers() {
     onReady: (payload: { user: CurrentUser; heartbeatTimeout: string }) => {
       useChatStore.setState({
         currentUser: payload.user,
-        notice: localized("notice.realtimeReady", { timeout: payload.heartbeatTimeout }),
+        status: "connected",
+        reconnectAttempt: 0,
       });
     },
     onPresence: ({ user }: { user: OnlineUser }) => {
       useChatStore.setState((state) => {
+        if (user.username === state.currentUser?.username) {
+          const conversations = { ...state.conversations };
+          delete conversations[conversationIdFor("private", user.username)];
+          return {
+            onlineUsers: state.onlineUsers.filter(
+              (entry) => entry.username !== user.username,
+            ),
+            conversations,
+          };
+        }
         const users = state.onlineUsers
           .filter((entry) => entry.username !== user.username)
           .concat(user.online ? [user] : [])
@@ -596,6 +618,59 @@ function connectionHandlers() {
     },
     onGroupMessage: (message: ChatMessage, requestId?: string) => {
       ingestRealtimeMessage(message, requestId);
+    },
+    onGroupChanged: (payload: GroupChangedPayload) => {
+      const { group, removedUsername } = payload;
+      const cid = conversationIdFor("group", String(group.groupID));
+      let shouldLoadActiveGroup = false;
+
+      useChatStore.setState((state) => {
+        const removedCurrentUser = removedUsername === state.currentUser?.username;
+        if (removedCurrentUser) {
+          const conversations = { ...state.conversations };
+          const messagesByConversation = { ...state.messagesByConversation };
+          const historyCursors = { ...state.historyCursors };
+          delete conversations[cid];
+          delete messagesByConversation[cid];
+          delete historyCursors[cid];
+          return {
+            groups: state.groups.filter((entry) => entry.groupID !== group.groupID),
+            conversations,
+            messagesByConversation,
+            historyCursors,
+            activeConversationId:
+              state.activeConversationId === cid
+                ? publicConversationId
+                : state.activeConversationId,
+          };
+        }
+
+        const existing = state.conversations[cid];
+        shouldLoadActiveGroup = state.activeConversationId === cid;
+        return {
+          groups: [
+            ...state.groups.filter((entry) => entry.groupID !== group.groupID),
+            group,
+          ],
+          conversations: {
+            ...state.conversations,
+            [cid]: {
+              ...(existing ?? groupConversation(group)),
+              ...groupConversation(group),
+              members: removedUsername
+                ? existing?.members?.filter(
+                    (member) => member.user.username !== removedUsername,
+                  )
+                : existing?.members,
+            },
+          },
+        };
+      });
+
+      // 只有正在查看这个群时才补拉历史和完整成员信息；侧栏更新只依赖事件负载。
+      if (shouldLoadActiveGroup) {
+        fireAndForget(useChatStore.getState().loadGroupHistory(group.groupID));
+      }
     },
     onReconnectScheduled: (attempt: number, delayMs: number) => {
       useChatStore.setState({
@@ -683,7 +758,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   lastSelectedFile: "",
   historyTarget: "",
   onlineUsers: [],
-  draft: "",
+  draftsByConversation: {},
   groups: [],
   newGroupName: "",
   newGroupMembers: "",
@@ -738,7 +813,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setRegisterForm: (patch) =>
     set((state) => ({ registerForm: { ...state.registerForm, ...patch } })),
   setHistoryTarget: (historyTarget) => set({ historyTarget }),
-  setDraft: (draft) => set({ draft }),
+  setDraft: (draft) =>
+    set((state) => ({
+      draftsByConversation: {
+        ...state.draftsByConversation,
+        [state.activeConversationId]: draft,
+      },
+    })),
   setLastSelectedFile: (lastSelectedFile) => set({ lastSelectedFile }),
   setNewGroupName: (newGroupName) => set({ newGroupName }),
   setNewGroupMembers: (newGroupMembers) => set({ newGroupMembers }),
@@ -782,6 +863,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           historyPage.nextCursor,
           users,
           groups,
+          response.user.username,
           localState
             ? {
                 activeConversationId: publicConversationId,
@@ -932,6 +1014,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   // ── Conversations ──
   openPrivateConversation: async (username, options) => {
+    if (username === get().currentUser?.username) return;
     const cid = conversationIdFor("private", username);
     const shouldPreloadHistory = options?.preloadHistory === true;
     set((state) => {
@@ -983,7 +1066,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
     if (!token) { set({ error: t(get().language, "error.loginBeforeHistory") }); return; }
     try {
       set({ error: "" });
-      const users = await api.getOnlineUsers(token);
+      const users = (await api.getOnlineUsers(token)).filter(
+        (user) => user.username !== get().currentUser?.username,
+      );
       set((state) => {
         const conversations = users.reduce<Record<string, Conversation>>((acc, user) => {
           const cid = conversationIdFor("private", user.username);
@@ -997,6 +1082,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
           };
           return acc;
         }, { ...state.conversations });
+        if (state.currentUser) {
+          delete conversations[
+            conversationIdFor("private", state.currentUser.username)
+          ];
+        }
         return {
           onlineUsers: users,
           conversations,
@@ -1012,13 +1102,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
   // ── Messaging ──
   sendMessage: async () => {
     const state = get();
-    const content = state.draft.trim();
+    // 捕获“点击发送”这一刻的会话。WebSocket 发送和 Zustand 更新之间存在异步边界，
+    // 用户可能在这期间切换会话，所以后面不能再用 current.activeConversationId。
+    const activeConversationId = state.activeConversationId;
+    const content = (
+      state.draftsByConversation[activeConversationId] ?? ""
+    ).trim();
     if (!content) return;
     if (!state.token || state.status !== "connected" || !state.currentUser) {
       set({ error: t(state.language, "error.connectBeforeSend") });
       return;
     }
-    const view = activeView(state.activeConversationId);
+    const view = activeView(activeConversationId);
     if (view.scope === "private" && !view.peer) {
       set({ error: t(state.language, "error.choosePrivate") });
       return;
@@ -1049,13 +1144,21 @@ export const useChatStore = create<ChatState>((set, get) => ({
       );
     }
 
-    // 在 set 回调内原子性地检查 draft，防止并发 sendMessage 读到同一值产生重复消息
+    // 在 set 回调内原子性地检查当前会话的草稿，防止并发发送重复消费同一内容。
+    // 草稿按会话保存，切换聊天时不会把上一位用户的内容带到新会话。
     set((current) => {
-      const currentDraft = current.draft.trim();
+      const currentDraft = (
+        current.draftsByConversation[activeConversationId] ?? ""
+      ).trim();
       if (currentDraft !== content) return current;
       return {
         error: sent ? "" : t(current.language, "error.socketNotReady"),
-        draft: sent ? "" : current.draft,
+        draftsByConversation: sent
+          ? {
+              ...current.draftsByConversation,
+              [activeConversationId]: "",
+            }
+          : current.draftsByConversation,
         messagesByConversation: {
           ...current.messagesByConversation,
           [cid]: mergeMessages(current.messagesByConversation[cid] ?? [], [
@@ -1147,13 +1250,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const cid = conversationIdFor("group", String(group.groupID));
       const conversation = groupConversation(group);
       set((state) => ({
-        groups: [...state.groups, group],
+        groups: [
+          ...state.groups.filter((entry) => entry.groupID !== group.groupID),
+          group,
+        ],
         conversations: { ...state.conversations, [cid]: conversation },
         activeConversationId: cid,
         newGroupName: "",
         newGroupMembers: "",
         notice: t(state.language, "notice.groupCreated", { name: group.groupName }),
       }));
+      // 创建接口已返回群资料，所以侧栏可以立即更新；成员和历史在后台补齐，
+      // 不阻塞模态框关闭，也不再要求用户点一次“刷新”。
+      fireAndForget(get().loadGroupHistory(group.groupID));
     } catch (err) {
       if (isUnauthorizedError(err)) { expireSession(); return; }
       set({ error: err instanceof Error ? err.message : t(get().language, "error.createGroup") });
@@ -1194,7 +1303,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
       set((state) => {
         const existing = state.conversations[cid];
         return {
-          activeConversationId: cid,
+          // 加载历史只更新目标群的缓存，不能顺便执行导航。
+          // 请求期间用户可能已经切换到其他会话；如果这里重新写入 cid，
+          // 较晚返回的后台请求就会把界面强行切回这个群。
           historyLoading: false,
           messagesByConversation: { ...state.messagesByConversation, [cid]: messages },
           historyCursors: { ...state.historyCursors, [cid]: history.nextCursor },
@@ -1316,6 +1427,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           historyPage.nextCursor,
           users,
           groups,
+          storedUser.username,
           localState
             ? {
                 activeConversationId: publicConversationId,
@@ -1382,16 +1494,7 @@ export function selectActiveConversation(state: ChatState) {
 }
 
 export function selectConversationList(state: ChatState) {
-  return Object.values(state.conversations).sort((left, right) => {
-    if (left.id === publicConversationId) return -1;
-    if (right.id === publicConversationId) return 1;
-    if (!left.updatedAt && right.updatedAt) return 1;
-    if (left.updatedAt && !right.updatedAt) return -1;
-    const leftTs = left.updatedAt;
-    const rightTs = right.updatedAt;
-    if (leftTs && rightTs) return rightTs.localeCompare(leftTs);
-    return left.title.localeCompare(right.title);
-  });
+  return sortedConversationList(state.conversations, state.currentUser?.username);
 }
 
 export function selectActiveStats(state: ChatState) {

@@ -77,6 +77,28 @@ export function groupConversation(group: Group): Conversation {
   };
 }
 
+export function sortedConversationList(
+  conversations: Record<string, Conversation>,
+  currentUsername?: string,
+) {
+  return Object.values(conversations)
+    .filter(
+      (conversation) =>
+        conversation.scope !== "private" ||
+        conversation.peerUsername !== currentUsername,
+    )
+    .sort((left, right) => {
+      if (left.id === publicConversationId) return -1;
+      if (right.id === publicConversationId) return 1;
+      if (!left.updatedAt && right.updatedAt) return 1;
+      if (left.updatedAt && !right.updatedAt) return -1;
+      const leftTs = left.updatedAt;
+      const rightTs = right.updatedAt;
+      if (leftTs && rightTs) return rightTs.localeCompare(leftTs);
+      return left.title.localeCompare(right.title);
+    });
+}
+
 export function publicConversation(
   messages: ChatMessageView[] = [],
 ): Conversation {

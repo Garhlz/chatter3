@@ -1,25 +1,47 @@
+import { Hash, Search, Users, X } from "lucide-react";
 import { useState } from "react";
 import { useShallow } from "zustand/shallow";
 import { t } from "../i18n";
+import { selectConversationList, useChatStore } from "../store/chatStore";
+import type { Conversation } from "../store/helpers";
 import {
   conversationDisplayTitle,
-  conversationIsEmptyShell,
   conversationListSecondaryText,
-  conversationScopeLabel,
 } from "./conversationPresentation";
-import {
-  selectConversationList,
-  useChatStore,
-} from "../store/chatStore";
-import { cli } from "./utils";
+import { Avatar } from "./ui/Avatar";
+import { IconButton } from "./ui/IconButton";
+
+function conversationTime(timestamp?: string) {
+  if (!timestamp) return "";
+  const date = new Date(timestamp);
+  const today = new Date();
+  if (date.toDateString() === today.toDateString()) {
+    return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  }
+  return date.toLocaleDateString([], { month: "numeric", day: "numeric" });
+}
+
+function ConversationAvatar({ conversation }: { conversation: Conversation }) {
+  if (conversation.scope === "public") {
+    return <span className="conversation-symbol"><Hash aria-hidden="true" /></span>;
+  }
+  if (conversation.scope === "group") {
+    return <span className="conversation-symbol"><Users aria-hidden="true" /></span>;
+  }
+  return (
+    <Avatar
+      user={{
+        username: conversation.peerUsername,
+        nickname: conversationDisplayTitle(conversation),
+      }}
+      online={conversation.online}
+    />
+  );
+}
 
 export function ConversationList({
-  onProfileOpen,
-  onCreateGroup,
   onConversationOpen,
 }: {
-  onProfileOpen: (username: string) => void;
-  onCreateGroup: () => void;
   onConversationOpen?: () => void;
 }) {
   const language = useChatStore((state) => state.language);
@@ -27,118 +49,82 @@ export function ConversationList({
   const activeConversationId = useChatStore((state) => state.activeConversationId);
   const conversations = useChatStore(useShallow(selectConversationList));
   const openConversation = useChatStore((state) => state.openConversation);
-  const loadGroups = useChatStore((state) => state.loadGroups);
   const [query, setQuery] = useState("");
 
-  const filtered = query.trim()
-    ? conversations.filter(
-        (c) =>
-          c.title.toLowerCase().includes(query.toLowerCase()) ||
-          c.peerNickname?.toLowerCase().includes(query.toLowerCase()) ||
-          c.peerUsername.toLowerCase().includes(query.toLowerCase()) ||
-          c.description.toLowerCase().includes(query.toLowerCase()) ||
-          c.creatorUsername?.toLowerCase().includes(query.toLowerCase()),
+  const normalizedQuery = query.trim().toLocaleLowerCase();
+  const filtered = normalizedQuery
+    ? conversations.filter((conversation) =>
+        [
+          conversationDisplayTitle(conversation),
+          conversation.peerUsername,
+          conversation.description,
+          conversation.lastMessage ?? "",
+        ].some((value) => value.toLocaleLowerCase().includes(normalizedQuery)),
       )
     : conversations;
 
   return (
-    <section className="panel session-panel">
-      <div className="conv-search-bar">
+    <section className="conversation-list-section" aria-label={t(language, "conversations.title")}>
+      <div className="conversation-search">
+        <Search aria-hidden="true" />
         <input
-          className="conv-search-input"
+          data-conversation-search
           value={query}
-          onChange={(e) => setQuery(e.target.value)}
+          onChange={(event) => setQuery(event.target.value)}
           disabled={!token}
           placeholder={t(language, "conv.search")}
         />
-        <button
-          type="button"
-          className="secondary-button compact-button conv-add-btn"
-          disabled={!token}
-          onClick={onCreateGroup}
-          title={t(language, "conv.createGroup")}
-        >
-          +
-        </button>
-        <button
-          type="button"
-          className="secondary-button compact-button"
-          disabled={!token}
-          onClick={cli(() => loadGroups())}
-          title={t(language, "conv.refresh")}
-        >
-          ↻
-        </button>
+        {query ? (
+          <IconButton
+            icon={X}
+            label={t(language, "feedback.dismiss")}
+            size="small"
+            onClick={() => setQuery("")}
+          />
+        ) : null}
       </div>
 
-      <div className="channel-list">
+      <div className="conversation-list">
         {filtered.map((conversation) => (
           <button
             type="button"
             key={conversation.id}
-            className={`channel-card ${
-              `channel-card-${conversation.kindLabel ?? conversation.scope}`
-            } ${
-              activeConversationId === conversation.id
-                ? "channel-card-active"
-                : ""
+            className={`conversation-item ${
+              activeConversationId === conversation.id ? "is-active" : ""
             }`}
-            onClick={() => openConversation(conversation.id)}
-            onClickCapture={() => onConversationOpen?.()}
+            onClick={() => {
+              openConversation(conversation.id);
+              onConversationOpen?.();
+            }}
           >
-            {conversation.scope === "private" ? (
-              <span
-                className={`channel-pulse ${
-                  conversation.online === false ? "channel-pulse-muted" : ""
-                }`}
-              />
-            ) : null}
-            <div className="channel-card-main">
-              <div className="channel-card-title-row">
+            <ConversationAvatar conversation={conversation} />
+            <span className="conversation-item-copy">
+              <span className="conversation-item-heading">
                 <strong>{conversationDisplayTitle(conversation)}</strong>
-                <span className="channel-kind-tag">
-                  {conversationScopeLabel(language, conversation)}
-                </span>
-              </div>
-              <small>
-                {token
-                  ? conversationListSecondaryText(language, conversation)
-                  : t(language, "conversations.loginRequired")}
-              </small>
-              {token && conversationIsEmptyShell(conversation) ? (
-                <span className="channel-empty-hint">
-                  {t(language, "conv.emptyState")}
-                </span>
-              ) : null}
-            </div>
-            <div className="channel-card-side">
-              {conversation.scope === "private" && conversation.peerUsername ? (
-                <button
-                  type="button"
-                  className="conv-profile-link"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onProfileOpen(conversation.peerUsername);
-                  }}
-                  aria-label={t(language, "conv.viewProfile")}
-                  title={t(language, "conv.viewProfile")}
-                >
-                  &#9432;
-                </button>
-              ) : null}
-              {conversation.unreadCount > 0 ? (
-                <em>{conversation.unreadCount}</em>
-              ) : null}
-            </div>
+                <time>{conversationTime(conversation.updatedAt)}</time>
+              </span>
+              <span className="conversation-item-preview">
+                {conversationListSecondaryText(language, conversation)}
+              </span>
+            </span>
+            {conversation.unreadCount > 0 ? (
+              <span className="unread-badge">
+                {conversation.unreadCount > 99 ? "99+" : conversation.unreadCount}
+              </span>
+            ) : null}
           </button>
         ))}
 
-        {filtered.length === 0 && (
-          <div className="placeholder-card">
+        {filtered.length === 0 ? (
+          <div className="conversation-empty">
+            <Search aria-hidden="true" />
             <strong>{t(language, "conv.noResults")}</strong>
             <span>{t(language, "conv.noResultsHint")}</span>
+            <button type="button" onClick={() => setQuery("")}>
+              {t(language, "feedback.dismiss")}
+            </button>
           </div>
-        )}
+        ) : null}
       </div>
     </section>
   );

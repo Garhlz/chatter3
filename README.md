@@ -20,13 +20,13 @@ chatter3/
 
 ## 技术栈
 
-| 层 | 技术 | 用途 |
-|---|------|------|
-| 桌面壳 | Tauri 2 + Rust | 托盘、通知、keyring token 存储、SQLite 本地消息持久化、HTTP/WS 协议客户端 |
-| 前端 UI | React 18 + Vite 7 + TypeScript | 聊天界面渲染、zustand 状态管理 |
-| 后端 | Go + pgx + goose + sqlc | HTTP/WS 服务、JWT 鉴权、消息路由、文件上传 |
-| 数据库 | PostgreSQL (Docker) | 用户、消息、群组、文件元数据持久化 |
-| 本地存储 | SQLite (rusqlite bundled) | 离线消息缓存、启动即时展示 |
+| 层       | 技术                           | 用途                                                                      |
+| -------- | ------------------------------ | ------------------------------------------------------------------------- |
+| 桌面壳   | Tauri 2 + Rust                 | 托盘、通知、keyring token 存储、SQLite 本地消息持久化、HTTP/WS 协议客户端 |
+| 前端 UI  | React 19 + Vite 7 + TypeScript | 聊天界面渲染、zustand 状态管理                                            |
+| 后端     | Go + pgx + goose + sqlc        | HTTP/WS 服务、JWT 鉴权、消息路由、文件上传                                |
+| 数据库   | PostgreSQL (Docker)            | 用户、消息、群组、文件元数据持久化                                        |
+| 本地存储 | SQLite (rusqlite bundled)      | 离线消息缓存、启动即时展示                                                |
 
 ## 快速开始
 
@@ -48,6 +48,7 @@ cd frontend
 cp .env.example .env
 npm install
 npm run dev                 # Vite dev server (:1420), 代理 /api → 后端
+npm test                    # Vitest 组件与纯逻辑测试
 npm run typecheck           # TypeScript 检查
 npm run build               # 生产构建
 cargo check --manifest-path src-tauri/Cargo.toml  # Rust 检查
@@ -68,54 +69,54 @@ CHATTER_TEST_DATABASE_URL="$DATABASE_URL" \
 
 HTTP + JSON 做认证和数据查询，WebSocket + JSON 做实时事件推送。
 
-详情：[docs/protocol-v2.md](docs/protocol-v2.md) | 架构：[docs/dev-architecture.md](docs/dev-architecture.md)
+详情：[docs/protocol-v2.md](docs/protocol-v2.md) | 架构：[docs/dev-architecture.md](docs/dev-architecture.md) | UI 设计：[docs/frontend-ui-design.md](docs/frontend-ui-design.md)
 
 ## 进度
 
 ### 后端
 
-| 功能 | 状态 |
-|------|------|
-| 注册 / 登录 (JWT + bcrypt) | 完成 |
-| 公共 / 私聊 / 群聊实时消息 + 历史（cursor 分页） | 完成 |
-| 在线状态 / 心跳 / 断线清理 | 完成 |
-| 群组 CRUD（创建/列表/加人/踢人/角色） | 完成 |
-| 文件上传下载（权限校验 + MD5） | 完成 |
-| 群文件上传 | 未实现 |
-| 删群 HTTP endpoint | 未实现 |
-| 已读回执 / 撤回 / 多端同步 | 未实现 |
+| 功能                                             | 状态   |
+| ------------------------------------------------ | ------ |
+| 注册 / 登录 (JWT + bcrypt)                       | 完成   |
+| 公共 / 私聊 / 群聊实时消息 + 历史（cursor 分页） | 完成   |
+| 在线状态 / 心跳 / 断线清理                       | 完成   |
+| 群组 CRUD（创建/列表/加人/踢人/角色）            | 完成   |
+| 文件上传下载（权限校验 + MD5）                   | 完成   |
+| 群文件上传                                       | 未实现 |
+| 删群 HTTP endpoint                               | 未实现 |
+| 已读回执 / 撤回 / 多端同步                       | 未实现 |
 
 ### 前端
 
-| 功能 | 状态 |
-|------|------|
-| 登录 / 注册 | 完成 |
-| 公共 / 私聊 / 群聊聊天 UI | 完成 |
-| 系统托盘、单实例、窗口状态记忆 | 完成 |
-| 原生 OS 通知 | 完成 |
-| SQLite 本地消息持久化 | 完成 |
-| JWT keyring 安全存储 | 完成 |
-| 文件上传下载 UI + 文件消息卡片 | 完成 |
-| i18n 中英文 + 日/夜/系统主题 | 完成 |
-| 消息发送状态 (sending/sent/failed/retry) | 完成 |
-| HTTP/WS 协议 Rust 客户端 (api.rs, realtime.rs) | 完成 |
-| 群文件上传 UI | 未实现 |
-| 删群 UI | 未实现 |
+| 功能                                           | 状态   |
+| ---------------------------------------------- | ------ |
+| 登录 / 注册                                    | 完成   |
+| 公共 / 私聊 / 群聊聊天 UI                      | 完成   |
+| 系统托盘、单实例、窗口状态记忆                 | 完成   |
+| 原生 OS 通知                                   | 完成   |
+| SQLite 本地消息持久化                          | 完成   |
+| JWT keyring 安全存储                           | 完成   |
+| 文件上传下载 UI + 文件消息卡片                 | 完成   |
+| i18n 中英文 + 日/夜/系统主题                   | 完成   |
+| 消息发送状态 (sending/sent/failed/retry)       | 完成   |
+| HTTP/WS 协议 Rust 客户端 (api.rs, realtime.rs) | 完成   |
+| 群文件上传 UI                                  | 未实现 |
+| 删群 UI                                        | 未实现 |
 
 ### 桌面能力
 
-| 功能 | 状态 |
-|------|------|
-| 系统托盘（关闭=隐藏，Show/Reconnect/Quit 菜单） | 完成 |
-| 单实例（重复启动激活已有窗口） | 完成 |
-| 窗口状态持久化（位置/大小/最大化记忆） | 完成 |
-| 原生 OS 通知 | 完成 |
-| JWT Token 系统凭据库存储 (Keychain / Credential Manager / libsecret) | 完成 |
-| SQLite 本地消息持久化 | 完成 |
-| Rust HTTP + WebSocket 协议客户端 | 完成 |
-| 全局快捷键 | 未实现 |
-| 自动更新 | 未实现 |
-| 自动启动 | 未实现 |
+| 功能                                                                 | 状态   |
+| -------------------------------------------------------------------- | ------ |
+| 系统托盘（关闭=隐藏，Show/Reconnect/Quit 菜单）                      | 完成   |
+| 单实例（重复启动激活已有窗口）                                       | 完成   |
+| 窗口状态持久化（位置/大小/最大化记忆）                               | 完成   |
+| 原生 OS 通知                                                         | 完成   |
+| JWT Token 系统凭据库存储 (Keychain / Credential Manager / libsecret) | 完成   |
+| SQLite 本地消息持久化                                                | 完成   |
+| Rust HTTP + WebSocket 协议客户端                                     | 完成   |
+| 全局快捷键                                                           | 未实现 |
+| 自动更新                                                             | 未实现 |
+| 自动启动                                                             | 未实现 |
 
 ## 开发环境
 

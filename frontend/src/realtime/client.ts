@@ -1,5 +1,6 @@
 import type {
   ChatMessage,
+  GroupChangedPayload,
   GroupSendPayload,
   PresencePayload,
   PrivateSendPayload,
@@ -24,6 +25,7 @@ type RealtimeHandlers = {
   onPublicMessage: (message: ChatMessage, requestId?: string) => void;
   onPrivateMessage: (message: ChatMessage, requestId?: string) => void;
   onGroupMessage: (message: ChatMessage, requestId?: string) => void;
+  onGroupChanged: (payload: GroupChangedPayload) => void;
   onReconnectScheduled?: (attempt: number, delayMs: number) => void;
 };
 
@@ -174,6 +176,9 @@ export function createRealtimeClient(baseURL: string) {
                 payload.payload as ChatMessage,
                 payload.requestId,
               );
+              break;
+            case "group.changed":
+              handlers.onGroupChanged(payload.payload as GroupChangedPayload);
               break;
             case "error":
               handlers.onError(

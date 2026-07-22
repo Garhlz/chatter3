@@ -1,5 +1,8 @@
+import { AlertCircle, CheckCircle2, X } from "lucide-react";
+import { useEffect } from "react";
 import { t } from "../i18n";
 import { useChatStore } from "../store/chatStore";
+import { IconButton } from "./ui/IconButton";
 
 export function GlobalFeedback() {
   const language = useChatStore((state) => state.language);
@@ -9,47 +12,43 @@ export function GlobalFeedback() {
   const clearError = useChatStore((state) => state.clearError);
   const clearNotice = useChatStore((state) => state.clearNotice);
 
-  if (!notice && !error) {
-    return null;
-  }
+  useEffect(() => {
+    if (!notice) return;
+    const timer = window.setTimeout(clearNotice, 3000);
+    return () => window.clearTimeout(timer);
+  }, [clearNotice, notice]);
+
+  if (!notice && !error) return null;
 
   return (
-    <section className="feedback-stack" aria-live="polite">
-      {notice ? (
-        <div className="callout neutral feedback-card">
-          <div className="feedback-copy">
-            <strong>{t(language, "feedback.notice")}</strong>
-            <span>{notice}</span>
-          </div>
-          <button
-            type="button"
-            className="secondary-button compact-button"
-            onClick={clearNotice}
-          >
-            {t(language, "feedback.dismiss")}
-          </button>
-        </div>
-      ) : null}
-
-      {error ? (
-        <div className="callout error feedback-card" role="alert">
-          <div className="feedback-copy">
-            <strong>
-              {authExpired
-                ? t(language, "feedback.sessionExpired")
-                : t(language, "feedback.error")}
-            </strong>
+    <>
+      {authExpired && error ? (
+        <section className="session-expired-banner" role="alert">
+          <AlertCircle aria-hidden="true" />
+          <div>
+            <strong>{t(language, "feedback.sessionExpired")}</strong>
             <span>{error}</span>
           </div>
-          <button
-            type="button"
-            className="secondary-button compact-button"
-            onClick={clearError}
-          >
-            {t(language, "feedback.dismiss")}
-          </button>
-        </div>
+          <IconButton icon={X} label={t(language, "feedback.dismiss")} onClick={clearError} />
+        </section>
       ) : null}
-    </section>
+
+      <section className="toast-viewport" aria-live="polite" aria-atomic="true">
+        {notice ? (
+          <div className="toast toast-success">
+            <CheckCircle2 aria-hidden="true" />
+            <span>{notice}</span>
+            <IconButton icon={X} label={t(language, "feedback.dismiss")} size="small" onClick={clearNotice} />
+          </div>
+        ) : null}
+        {error && !authExpired ? (
+          <div className="toast toast-error" role="alert">
+            <AlertCircle aria-hidden="true" />
+            <span>{error}</span>
+            <IconButton icon={X} label={t(language, "feedback.dismiss")} size="small" onClick={clearError} />
+          </div>
+        ) : null}
+      </section>
+    </>
   );
 }

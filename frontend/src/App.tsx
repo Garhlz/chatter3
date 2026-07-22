@@ -1,20 +1,21 @@
-import { useEffect, useState } from "react";
+import { Menu } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { AuthPanel } from "./components/AuthPanel";
 import { ChatPanel } from "./components/ChatPanel";
-import { ConversationList } from "./components/ConversationList";
 import { CreateGroupModal } from "./components/CreateGroupModal";
 import { DevPanel } from "./components/DevPanel";
 import { GlobalFeedback } from "./components/GlobalFeedback";
 import { SettingsModal } from "./components/SettingsModal";
-import { IdentityPanel } from "./components/IdentityPanel";
+import { Sidebar } from "./components/Sidebar";
 import { UserProfileModal } from "./components/UserProfileModal";
+import { IconButton } from "./components/ui/IconButton";
 import {
   listenDesktopReconnect,
   listenDesktopWindowState,
 } from "./desktop";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { useWindowSizeClass } from "./hooks/useWindowSizeClass";
-import { statusLabel, t } from "./i18n";
+import { t } from "./i18n";
 import { useChatStore } from "./store/chatStore";
 import { resolveThemeMode, watchSystemTheme } from "./theme";
 
@@ -23,14 +24,9 @@ export function App() {
   const language = useChatStore((state) => state.language);
   const themeMode = useChatStore((state) => state.themeMode);
   const setResolvedTheme = useChatStore((state) => state.setResolvedTheme);
-  const status = useChatStore((state) => state.status);
   const reconnect = useChatStore((state) => state.reconnect);
-  const setDesktopWindowState = useChatStore(
-    (state) => state.setDesktopWindowState,
-  );
-  const hydrateDesktopPreferences = useChatStore(
-    (state) => state.hydrateDesktopPreferences,
-  );
+  const setDesktopWindowState = useChatStore((state) => state.setDesktopWindowState);
+  const hydrateDesktopPreferences = useChatStore((state) => state.hydrateDesktopPreferences);
   const disconnect = useChatStore((state) => state.disconnect);
   const openPrivateConversation = useChatStore((state) => state.openPrivateConversation);
   const bootstrapSession = useChatStore((state) => state.bootstrapSession);
@@ -40,8 +36,9 @@ export function App() {
   const [showCreateGroup, setShowCreateGroup] = useState(false);
   const [showSidebar, setShowSidebar] = useState(false);
   const [profileUsername, setProfileUsername] = useState<string | null>(null);
+  const bootstrapStarted = useRef(false);
   const windowSizeClass = useWindowSizeClass();
-  const isNarrowDesktop = windowSizeClass === "narrow-desktop";
+  const isOverlaySidebar = windowSizeClass === "narrow-desktop";
 
   useKeyboardShortcuts();
 
@@ -50,20 +47,18 @@ export function App() {
   }, [hydrateDesktopPreferences]);
 
   useEffect(() => {
+    // React StrictMode 在开发环境会额外执行一次 effect。恢复流程包含 HTTP 和
+    // WebSocket 副作用，所以同一次 App 挂载只允许启动一条恢复链路。
+    if (bootstrapStarted.current) return;
+    bootstrapStarted.current = true;
     void bootstrapSession();
   }, [bootstrapSession]);
 
-  useEffect(() => {
-    return () => {
-      disconnect();
-    };
-  }, [disconnect]);
+  useEffect(() => () => disconnect(), [disconnect]);
 
   useEffect(() => {
     setResolvedTheme(resolveThemeMode(themeMode));
-    if (themeMode !== "system") {
-      return;
-    }
+    if (themeMode !== "system") return;
     return watchSystemTheme(setResolvedTheme);
   }, [setResolvedTheme, themeMode]);
 
@@ -75,12 +70,11 @@ export function App() {
     void listenDesktopReconnect(() => reconnect()).then((cleanup) => {
       if (disposed) cleanup();
       else cleanupReconnect = cleanup;
-    }).catch(() => {});
+    });
     void listenDesktopWindowState(setDesktopWindowState).then((cleanup) => {
       if (disposed) cleanup();
       else cleanupWindowState = cleanup;
-    }).catch(() => {});
-
+    });
     return () => {
       disposed = true;
       cleanupReconnect?.();
@@ -89,10 +83,8 @@ export function App() {
   }, [reconnect, setDesktopWindowState]);
 
   useEffect(() => {
-    if (!isNarrowDesktop) {
-      setShowSidebar(false);
-    }
-  }, [isNarrowDesktop]);
+    if (!isOverlaySidebar) setShowSidebar(false);
+  }, [isOverlaySidebar]);
 
   if (!currentUser) {
     return (
@@ -103,91 +95,54 @@ export function App() {
   }
 
   return (
-    <div className={`desktop-shell size-${windowSizeClass}`}>
-      <header className="topbar">
-        <div className="topbar-brand">
-          <p className="topbar-eyebrow">{t(language, "app.eyebrow")}</p>
-          <strong>{t(language, "app.title")}</strong>
-        </div>
-        <div className="topbar-status">
-          <button
-            type="button"
-            className="secondary-button compact-button mobile-sidebar-toggle"
-            onClick={() => setShowSidebar((value) => !value)}
-            aria-label={
-              showSidebar
-                ? t(language, "app.closeSidebar")
-                : t(language, "app.openSidebar")
-            }
-            title={
-              showSidebar
-                ? t(language, "app.closeSidebar")
-                : t(language, "app.openSidebar")
-            }
-          >
-            {showSidebar ? "×" : "☰"}
-          </button>
-          <span className={`status-dot status-${status}`} />
-          <div>
-            <strong>{statusLabel(language, status)}</strong>
-            <small>{t(language, "app.currentUser", { name: currentUser.nickname })}</small>
-          </div>
-          <button
-            type="button"
-            className="secondary-button compact-button topbar-settings-btn"
-            onClick={() => setShowSettings(true)}
-            aria-label={t(language, "settings.title")}
-            title={t(language, "settings.title")}
-          >
-            ⚙
-          </button>
-        </div>
-      </header>
+    <div className={`app-shell size-${windowSizeClass}`}>
+      {isOverlaySidebar ? (
+        <IconButton
+          icon={Menu}
+          label={t(language, showSidebar ? "app.closeSidebar" : "app.openSidebar")}
+          className="mobile-sidebar-trigger"
+          onClick={() => setShowSidebar((visible) => !visible)}
+        />
+      ) : null}
+
+      <aside className={`app-sidebar ${isOverlaySidebar ? "is-overlay" : ""} ${showSidebar ? "is-open" : ""}`}>
+        <Sidebar
+          onCreateGroup={() => setShowCreateGroup(true)}
+          onConversationOpen={() => setShowSidebar(false)}
+          onProfileOpen={() => setProfileUsername(currentUser.username)}
+          onSettingsOpen={() => setShowSettings(true)}
+        />
+      </aside>
+
+      {isOverlaySidebar && showSidebar ? (
+        <button
+          type="button"
+          className="sidebar-backdrop"
+          onClick={() => setShowSidebar(false)}
+          aria-label={t(language, "app.closeSidebar")}
+        />
+      ) : null}
+
+      <main className="chat-stage">
+        <ChatPanel
+          onProfileOpen={(username) => setProfileUsername(username)}
+          windowSizeClass={windowSizeClass}
+        />
+      </main>
 
       <GlobalFeedback />
 
-      <main className={`workspace workspace-two-col workspace-${windowSizeClass}`}>
-        <aside
-          className={`sidebar ${
-            isNarrowDesktop ? "sidebar-overlay" : "sidebar-docked"
-          } ${showSidebar ? "show" : ""}`}
-        >
-          <IdentityPanel onProfileClick={() => setProfileUsername(currentUser.username)} />
-          <ConversationList
-            onProfileOpen={(username) => setProfileUsername(username)}
-            onCreateGroup={() => setShowCreateGroup(true)}
-            onConversationOpen={() => setShowSidebar(false)}
-          />
-        </aside>
-
-        {isNarrowDesktop && showSidebar ? (
-          <button
-            type="button"
-            className="sidebar-backdrop"
-            onClick={() => setShowSidebar(false)}
-            aria-label={t(language, "app.closeSidebar")}
-          />
-        ) : null}
-
-        <section className="stage">
-          <ChatPanel
-            windowSizeClass={windowSizeClass}
-            onProfileOpen={(username) => setProfileUsername(username)}
-          />
-        </section>
-      </main>
-
-      {showSettings && (
+      {showSettings ? (
         <SettingsModal
           onClose={() => setShowSettings(false)}
           onOpenDev={() => setShowDev(true)}
         />
-      )}
-      {showDev && <DevPanel onClose={() => setShowDev(false)} />}
-      {showCreateGroup && (
+      ) : null}
+      {showDev ? <DevPanel onClose={() => setShowDev(false)} /> : null}
+      {showCreateGroup ? (
         <CreateGroupModal onClose={() => setShowCreateGroup(false)} />
-      )}
-      {profileUsername && (
+      ) : null}
+      {profileUsername ? (
         <UserProfileModal
           username={profileUsername}
           onClose={() => setProfileUsername(null)}
@@ -196,7 +151,7 @@ export function App() {
             void openPrivateConversation(username, { preloadHistory: false });
           }}
         />
-      )}
+      ) : null}
     </div>
   );
 }

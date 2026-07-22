@@ -1,21 +1,20 @@
-import { useEffect, useRef, useState } from "react";
+import { Hash, Info, MoreHorizontal, RefreshCw, RotateCcw, Users, X } from "lucide-react";
+import { useEffect, useState } from "react";
 import { useShallow } from "zustand/shallow";
-import { Composer } from "./Composer";
-import {
-  conversationDisplayTitle,
-  conversationStaticSummary,
-} from "./conversationPresentation";
-import { GroupPanel } from "./GroupPanel";
-import { MessageList } from "./MessageList";
 import type { WindowSizeClass } from "../hooks/useWindowSizeClass";
 import { t } from "../i18n";
 import {
   selectActiveConversation,
-  selectActiveMessages,
   selectActiveStats,
   useChatStore,
 } from "../store/chatStore";
-import { cli } from "./utils";
+import { Composer } from "./Composer";
+import { conversationDisplayTitle } from "./conversationPresentation";
+import { GroupPanel } from "./GroupPanel";
+import { MessageList } from "./MessageList";
+import { Avatar } from "./ui/Avatar";
+import { ConnectionIndicator } from "./ui/ConnectionIndicator";
+import { IconButton } from "./ui/IconButton";
 
 export function ChatPanel({
   onProfileOpen,
@@ -25,200 +24,142 @@ export function ChatPanel({
   windowSizeClass: WindowSizeClass;
 }) {
   const language = useChatStore((state) => state.language);
-  const token = useChatStore((state) => state.token);
   const status = useChatStore((state) => state.status);
-  const activeHistoryCursor = useChatStore(
-    (state) => state.historyCursors[state.activeConversationId],
-  );
   const historyLoading = useChatStore((state) => state.historyLoading);
-  const lastSelectedFile = useChatStore((state) => state.lastSelectedFile);
-  const uploadingCount = useChatStore((state) => state.uploadingCount);
-  const uploadingFile = uploadingCount > 0;
-  const messages = useChatStore(useShallow(selectActiveMessages));
   const activeConversation = useChatStore(useShallow(selectActiveConversation));
   const activeStats = useChatStore(useShallow(selectActiveStats));
-  const loadOlderHistory = useChatStore((state) => state.loadOlderHistory);
   const reloadActiveHistory = useChatStore((state) => state.reloadActiveHistory);
-  const uploadFile = useChatStore((state) => state.uploadFile);
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const [showGroupPanel, setShowGroupPanel] = useState(false);
-
-  function handleBrowserFilePick() {
-    fileInputRef.current?.click();
-  }
-
-  function handleBrowserFileChange(event: React.ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    const receiver =
-      activeConversation.scope === "private"
-        ? activeConversation.peerUsername
-        : undefined;
-    cli(() => uploadFile(file, receiver))();
-    if (fileInputRef.current) {
-      fileInputRef.current.value = "";
-    }
-  }
-
-  function handlePickFile() {
-    // 真实上传仍然依赖浏览器 File 对象。
-    // 之前 Tauri 分支只拿到了本地路径字符串，界面看起来像“已选择”，但实际上无法上传。
-    // 在补齐原生文件读取桥接前，统一回到 input[type=file] 是更可靠的行为。
-    handleBrowserFilePick();
-  }
-
-  const historyScopeLabel =
-    activeConversation.scope === "public"
-      ? t(language, "chat.lobby")
-      : activeConversation.scope === "group"
-        ? t(language, "chat.group")
-        : t(language, "chat.direct");
-  const isConnected = status === "connected";
-  const messageCountLabel =
-    t(language, messages.length === 1 ? "chat.message" : "chat.messages", { count: messages.length });
-  const conversationTitle =
-    activeConversation.scope === "public"
-      ? t(language, "chat.publicTitle")
-      : activeConversation.scope === "private"
-        ? t(language, "chat.directTitle", {
-            name: conversationDisplayTitle(activeConversation),
-          })
-        : activeConversation.title;
-  const groupPanelMode =
-    windowSizeClass === "expanded" || windowSizeClass === "regular"
-      ? "docked"
-      : "drawer";
-  const canDockGroupPanel =
-    activeConversation.scope === "group" && groupPanelMode === "docked";
-  const canToggleGroupPanel =
-    activeConversation.scope === "group" && groupPanelMode === "drawer";
+  const reconnect = useChatStore((state) => state.reconnect);
+  const [showDetails, setShowDetails] = useState(false);
+  const [showMenu, setShowMenu] = useState(false);
 
   useEffect(() => {
-    setShowGroupPanel(false);
-  }, [activeConversation.id, groupPanelMode]);
+    setShowDetails(false);
+    setShowMenu(false);
+  }, [activeConversation.id]);
+
+  useEffect(() => {
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key !== "Escape") return;
+      if (showMenu) setShowMenu(false);
+      else if (showDetails) setShowDetails(false);
+    }
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [showDetails, showMenu]);
+
+  const title = conversationDisplayTitle(activeConversation);
+  const subtitle =
+    activeConversation.scope === "private"
+      ? activeConversation.online
+        ? t(language, "chat.live")
+        : t(language, "chat.offline")
+      : activeConversation.scope === "group"
+        ? t(language, "group.members", { count: activeConversation.memberCount ?? 0 })
+        : t(language, "conv.publicSummary");
 
   return (
-    <section className="panel conversation-panel">
-      <input
-        type="file"
-        ref={fileInputRef}
-        style={{ display: "none" }}
-        onChange={handleBrowserFileChange}
-      />
-
-      <header className="conversation-header">
-        <div className="conversation-heading">
-          <p className="section-label">{t(language, "chat.conversation")} / {historyScopeLabel}</p>
-          <h2>{conversationTitle}</h2>
-          <small>{conversationStaticSummary(language, activeConversation)}</small>
-        </div>
-        <div className="conversation-toolbar">
-          <div className="conversation-toolbar-status">
-            <span className={`scope-badge ${isConnected ? "scope-badge-live" : ""}`}>
-              {isConnected ? t(language, "chat.live") : t(language, "chat.offline")}
+    <section className={`chat-panel chat-panel-${windowSizeClass}`}>
+      <header className="chat-header">
+        <div className="chat-identity">
+          {activeConversation.scope === "private" ? (
+            <Avatar
+              user={{
+                username: activeConversation.peerUsername,
+                nickname: title,
+              }}
+              online={activeConversation.online}
+            />
+          ) : (
+            <span className="conversation-symbol is-header">
+              {activeConversation.scope === "group" ? <Users /> : <Hash />}
             </span>
-            <span className="scope-badge">{messageCountLabel}</span>
-            {activeStats.sendingCount > 0 ? (
-              <span className="scope-badge scope-badge-warn">
-                {t(language, "chat.sending", { count: activeStats.sendingCount })}
-              </span>
-            ) : null}
-            {activeStats.failedCount > 0 ? (
-              <span className="scope-badge scope-badge-error">
-                {t(language, "chat.failed", { count: activeStats.failedCount })}
-              </span>
-            ) : null}
-            {activeConversation.updatedAt ? (
-              <span className="scope-badge">
-                {new Date(activeConversation.updatedAt).toLocaleTimeString()}
-              </span>
-            ) : null}
+          )}
+          <div>
+            <strong>{title}</strong>
+            <span>{subtitle}</span>
           </div>
-          <div className="header-actions">
-            {activeHistoryCursor ? (
-              <button
-                type="button"
-                className="secondary-button compact-button"
-                disabled={historyLoading}
-                onClick={cli(() => loadOlderHistory())}
-              >
-                {historyLoading ? t(language, "chat.loading") : t(language, "chat.loadOlder")}
-              </button>
+        </div>
+
+        <div className="chat-header-actions">
+          {status !== "connected" ? (
+            <ConnectionIndicator language={language} status={status} />
+          ) : null}
+          {activeStats.failedCount > 0 ? (
+            <span className="failed-message-count">
+              {t(language, "chat.failed", { count: activeStats.failedCount })}
+            </span>
+          ) : null}
+          {activeConversation.scope === "private" ? (
+            <IconButton
+              icon={Info}
+              label={t(language, "conv.viewProfile")}
+              onClick={() => onProfileOpen(activeConversation.peerUsername)}
+            />
+          ) : activeConversation.scope === "group" ? (
+            <IconButton
+              icon={Info}
+              label={t(language, "chat.openDetails")}
+              onClick={() => setShowDetails(true)}
+            />
+          ) : null}
+          <div className="menu-anchor">
+            <IconButton
+              icon={MoreHorizontal}
+              label={t(language, "chat.moreActions")}
+              onClick={() => setShowMenu((visible) => !visible)}
+            />
+            {showMenu ? (
+              <div className="action-menu" role="menu">
+                <button
+                  type="button"
+                  disabled={historyLoading}
+                  onClick={() => {
+                    setShowMenu(false);
+                    void reloadActiveHistory();
+                  }}
+                >
+                  <RefreshCw aria-hidden="true" />
+                  {t(language, "chat.reload")}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowMenu(false);
+                    reconnect();
+                  }}
+                >
+                  <RotateCcw aria-hidden="true" />
+                  {t(language, "telemetry.reconnect")}
+                </button>
+              </div>
             ) : null}
-            <button
-              type="button"
-              className="secondary-button compact-button"
-              disabled={!token || historyLoading}
-              onClick={cli(() => reloadActiveHistory())}
-            >
-              {t(language, "chat.reload")}
-            </button>
-            {canToggleGroupPanel ? (
-              <button
-                type="button"
-                className="secondary-button compact-button"
-                onClick={() => setShowGroupPanel((value) => !value)}
-              >
-                {showGroupPanel
-                  ? t(language, "chat.closeDetails")
-                  : t(language, "chat.openDetails")}
-              </button>
-            ) : null}
-            <button
-              type="button"
-              className="secondary-button compact-button"
-              disabled={!token || uploadingFile}
-              onClick={() => handlePickFile()}
-            >
-              {uploadingFile ? t(language, "chat.uploading") : t(language, "chat.attachFile")}
-            </button>
           </div>
         </div>
       </header>
 
-      <div
-        className={`conversation-body ${
-          activeConversation.scope === "group"
-            ? `group-chat-layout group-chat-layout-${groupPanelMode}`
-            : "conversation-body-default"
-        }`}
-      >
-        <div className="conversation-main-column">
-          <MessageList onProfileOpen={onProfileOpen} />
-          {lastSelectedFile && !uploadingFile ? (
-            <div className="callout neutral file-callout">
-              {t(language, "chat.selected", { file: lastSelectedFile })}
-            </div>
-          ) : null}
-
-          {uploadingFile ? (
-            <div className="callout neutral">
-              {t(language, "chat.uploading")} {lastSelectedFile}
-            </div>
-          ) : null}
-
-          <Composer />
-        </div>
-
-        {activeConversation.scope === "group" && canDockGroupPanel ? (
-          <GroupPanel mode="docked" onProfileOpen={onProfileOpen} />
-        ) : null}
+      <div className="chat-content">
+        <MessageList onProfileOpen={onProfileOpen} />
+        <Composer />
       </div>
 
-      {activeConversation.scope === "group" && canToggleGroupPanel && showGroupPanel ? (
-        <div className="info-drawer-shell">
+      {showDetails && activeConversation.scope === "group" ? (
+        <div className="details-layer">
           <button
             type="button"
-            className="info-drawer-backdrop"
-            onClick={() => setShowGroupPanel(false)}
+            className="details-backdrop"
+            onClick={() => setShowDetails(false)}
             aria-label={t(language, "chat.closeDetails")}
           />
-          <GroupPanel
-            mode="drawer"
-            onClose={() => setShowGroupPanel(false)}
-            onProfileOpen={onProfileOpen}
-          />
+          <aside className="details-drawer">
+            <IconButton
+              icon={X}
+              label={t(language, "chat.closeDetails")}
+              className="details-close"
+              onClick={() => setShowDetails(false)}
+            />
+            <GroupPanel mode="drawer" onProfileOpen={onProfileOpen} />
+          </aside>
         </div>
       ) : null}
     </section>

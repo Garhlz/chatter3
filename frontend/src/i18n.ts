@@ -79,10 +79,13 @@ type TranslationKey =
   | "chat.reload"
   | "chat.openDetails"
   | "chat.closeDetails"
+  | "chat.moreActions"
   | "chat.live"
   | "chat.offline"
   | "chat.uploading"
   | "chat.attachFile"
+  | "chat.groupFilesUnsupported"
+  | "chat.newMessages"
   | "chat.selected"
   | "chat.emptyKicker"
   | "chat.emptyTitle"
@@ -297,10 +300,13 @@ const dictionaries: Record<Language, Record<TranslationKey, string>> = {
     "chat.reload": "刷新",
     "chat.openDetails": "查看群信息",
     "chat.closeDetails": "关闭群信息",
+    "chat.moreActions": "更多操作",
     "chat.live": "在线",
     "chat.offline": "离线",
     "chat.uploading": "上传中...",
     "chat.attachFile": "添加文件",
+    "chat.groupFilesUnsupported": "群文件暂未支持",
+    "chat.newMessages": "{count} 条新消息",
     "chat.selected": "已选择：{file}",
     "chat.emptyKicker": "暂无消息",
     "chat.emptyTitle": "当前会话还没有加载消息",
@@ -512,10 +518,13 @@ const dictionaries: Record<Language, Record<TranslationKey, string>> = {
     "chat.reload": "Reload",
     "chat.openDetails": "Open group info",
     "chat.closeDetails": "Close group info",
+    "chat.moreActions": "More actions",
     "chat.live": "Live",
     "chat.offline": "Offline",
     "chat.uploading": "Uploading...",
     "chat.attachFile": "Attach file",
+    "chat.groupFilesUnsupported": "Group file sharing is not supported yet",
+    "chat.newMessages": "{count} new messages",
     "chat.selected": "Selected: {file}",
     "chat.emptyKicker": "No messages",
     "chat.emptyTitle": "This conversation has no loaded messages",

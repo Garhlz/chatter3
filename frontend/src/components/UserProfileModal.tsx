@@ -1,9 +1,11 @@
+import { X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { createUnifiedAPI } from "../desktop";
 import { httpBaseURL } from "../config";
 import { t } from "../i18n";
 import { useChatStore } from "../store/chatStore";
 import { cli } from "./utils";
+import { IconButton } from "./ui/IconButton";
 
 type ProfileData = {
   user: { userId: number; username: string; nickname: string; avatarUrl?: string; online?: boolean };
@@ -100,6 +102,9 @@ export function UserProfileModal({
     <div className="modal-overlay" onClick={onClose}>
       <div
         className="modal-panel"
+        role="dialog"
+        aria-modal="true"
+        aria-label={t(language, "profile.label")}
         onClick={(e) => e.stopPropagation()}
       >
         <header className="panel-header">
@@ -107,13 +112,7 @@ export function UserProfileModal({
             <p className="section-label">{t(language, "profile.label")}</p>
             <h2>@{username}</h2>
           </div>
-          <button
-            type="button"
-            className="secondary-button compact-button"
-            onClick={onClose}
-          >
-            ×
-          </button>
+          <IconButton icon={X} label={t(language, "feedback.dismiss")} onClick={onClose} />
         </header>
 
         <div className="modal-body">

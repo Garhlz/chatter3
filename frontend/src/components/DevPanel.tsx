@@ -1,7 +1,9 @@
+import { X } from "lucide-react";
 import { httpBaseURL, wsBaseURL } from "../config";
 import { statusLabel, t } from "../i18n";
 import { useChatStore } from "../store/chatStore";
 import { cli } from "./utils";
+import { IconButton } from "./ui/IconButton";
 
 export function DevPanel({ onClose }: { onClose: () => void }) {
   const language = useChatStore((state) => state.language);
@@ -21,13 +23,7 @@ export function DevPanel({ onClose }: { onClose: () => void }) {
           <p className="section-label">{t(language, "dev.label")}</p>
           <h2>{t(language, "telemetry.title")}</h2>
         </div>
-        <button
-          type="button"
-          className="secondary-button compact-button"
-          onClick={onClose}
-        >
-          ×
-        </button>
+        <IconButton icon={X} label={t(language, "feedback.dismiss")} onClick={onClose} />
       </header>
 
       <div className="dev-section">

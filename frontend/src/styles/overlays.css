@@ -1,0 +1,277 @@
+.modal-overlay {
+  position: fixed;
+  z-index: 100;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  overflow-y: auto;
+  padding: 24px;
+  background: var(--color-overlay);
+}
+
+.modal-panel,
+.dev-panel {
+  width: min(520px, 100%);
+  max-height: min(760px, calc(100vh - 48px));
+  overflow-y: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-floating);
+}
+
+.panel-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.panel-header > div {
+  display: grid;
+  gap: 4px;
+}
+
+.panel-header h2 {
+  font-size: 20px;
+}
+
+.panel-header-tight h2 {
+  font-size: 18px;
+}
+
+.modal-panel > .panel-header,
+.modal-body,
+.settings-body {
+  padding: 20px;
+}
+
+.modal-panel > .panel-header {
+  padding-bottom: 15px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.modal-body,
+.settings-body,
+.modal-form,
+.profile-form,
+.profile-view {
+  display: grid;
+  gap: 16px;
+}
+
+.settings-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.6fr) minmax(0, 1fr);
+  align-items: center;
+  gap: 18px;
+}
+
+.settings-field {
+  display: grid;
+  gap: 6px;
+}
+
+.settings-divider {
+  height: 1px;
+  background: var(--color-border);
+}
+
+.profile-hero {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+}
+
+.profile-avatar {
+  display: grid;
+  width: 72px;
+  height: 72px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 50%;
+  color: var(--color-accent-contrast);
+  background: var(--color-accent);
+  font-size: 24px;
+  font-weight: 750;
+}
+
+.profile-avatar-small {
+  width: 48px;
+  height: 48px;
+  font-size: 17px;
+}
+
+.profile-hero-copy {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  gap: 4px;
+}
+
+.profile-hero-headline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.profile-field {
+  display: grid;
+  gap: 3px;
+}
+
+.profile-field > span:first-child {
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.dev-panel {
+  position: fixed;
+  z-index: 120;
+  right: 18px;
+  bottom: 18px;
+  width: min(420px, calc(100vw - 36px));
+  max-height: calc(100vh - 36px);
+  padding: 18px;
+}
+
+.dev-section {
+  display: grid;
+  gap: 10px;
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--color-border);
+}
+
+.connection-summary,
+.detail-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.detail-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.detail-grid > div {
+  display: grid;
+  gap: 2px;
+  padding: 9px;
+  border-radius: var(--radius-sm);
+  background: var(--color-canvas);
+}
+
+.telemetry-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.dev-input {
+  height: 36px;
+}
+
+.dev-action {
+  justify-self: start;
+}
+
+.toast-viewport {
+  position: fixed;
+  z-index: 200;
+  right: 18px;
+  bottom: 18px;
+  display: grid;
+  width: min(360px, calc(100vw - 36px));
+  gap: 8px;
+  pointer-events: none;
+}
+
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 11px 13px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-raised);
+  box-shadow: var(--shadow-menu);
+  pointer-events: auto;
+}
+
+.toast > svg,
+.session-expired-banner > svg {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+}
+
+.toast > span {
+  min-width: 0;
+  flex: 1;
+}
+
+.toast-success {
+  border-left: 3px solid var(--color-success);
+}
+
+.toast-error {
+  border-left: 3px solid var(--color-danger);
+}
+
+.session-expired-banner {
+  position: fixed;
+  z-index: 210;
+  top: 12px;
+  left: 50%;
+  width: min(560px, calc(100vw - 32px));
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 14px;
+  border-radius: var(--radius-md);
+  color: var(--color-danger);
+  background: var(--color-danger-soft);
+  box-shadow: var(--shadow-menu);
+  text-align: center;
+  transform: translateX(-50%);
+}
+
+.session-expired-banner > div {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+}
+
+.image-lightbox {
+  position: fixed;
+  z-index: 220;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 48px;
+}
+
+.lightbox-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgb(5 6 8 / 82%);
+}
+
+.image-lightbox img {
+  z-index: 1;
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: var(--radius-sm);
+  object-fit: contain;
+  box-shadow: var(--shadow-floating);
+}
+
+.image-lightbox .icon-button {
+  position: absolute;
+  z-index: 2;
+  top: 16px;
+  right: 16px;
+  color: white;
+  background: rgb(255 255 255 / 12%);
+}

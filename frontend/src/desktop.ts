@@ -474,7 +474,7 @@ export function createUnifiedAPI(baseURL: string) {
         : jsApi.getGroupMembers(token, groupID),
     addGroupMembers: (token: string, groupID: number, payload: AddGroupMemberRequest) =>
       runningInTauri()
-        ? tauriInvoke<void>("api_add_group_members", { token, groupId: groupID, payload })
+        ? tauriInvoke<GroupMember[]>("api_add_group_members", { token, groupId: groupID, payload })
         : jsApi.addGroupMembers(token, groupID, payload),
     removeGroupMember: (token: string, groupID: number, username: string) =>
       runningInTauri()
@@ -504,8 +504,32 @@ export function createUnifiedAPI(baseURL: string) {
   };
 }
 
+export async function loadDesktopFileBytes(
+  token: string,
+  fileID: number,
+): Promise<number[]> {
+  return tauriInvoke<number[]>("api_download_file_bytes", { token, fileId: fileID });
+}
+
+export async function saveDesktopFile(
+  token: string,
+  fileID: number,
+  suggestedFileName: string,
+): Promise<boolean> {
+  const { save } = await import("@tauri-apps/plugin-dialog");
+  const destinationPath = await save({ defaultPath: suggestedFileName });
+  if (!destinationPath) return false;
+
+  await tauriInvoke<void>("api_save_file", {
+    token,
+    fileId: fileID,
+    destinationPath,
+  });
+  return true;
+}
+
 type ProfileData = {
-  user: { userId: number; username: string; nickname: string; online: boolean };
+  user: CurrentUser;
   bio: string;
   gender: number;
   createdAt: string;
@@ -526,6 +550,7 @@ export function createUnifiedRealtime(wsBaseURL: string) {
   let unlistenEvent: Unlisten | null = null;
   let unlistenStatus: Unlisten | null = null;
   let unlistenReconnect: Unlisten | null = null;
+  let connectionGeneration = 0;
 
   async function setupTauriListeners(
     handlers: Parameters<typeof jsRealtime.connect>[1],
@@ -555,6 +580,11 @@ export function createUnifiedRealtime(wsBaseURL: string) {
             break;
           case "chat.group.message":
             handlers.onGroupMessage(data.payload, data.requestId);
+            break;
+          case "group.changed":
+            // Rust 层只负责维持桌面 WebSocket 并转发原始事件；业务状态仍由
+            // React/Zustand 处理，因此浏览器模式和 Tauri 模式共用同一套语义。
+            handlers.onGroupChanged(data.payload);
             break;
           case "error":
             handlers.onError(data.payload.message, data.payload.code);
@@ -591,11 +621,24 @@ export function createUnifiedRealtime(wsBaseURL: string) {
       handlers: Parameters<typeof jsRealtime.connect>[1],
       options?: { maxReconnectAttempts?: number; reconnectBaseDelayMs?: number },
     ) {
-      void setupTauriListeners(handlers);
+      const generation = ++connectionGeneration;
       handlers.onStatusChange("connecting");
-      void tauriInvoke("realtime_connect", { wsBaseUrl: wsBaseURL, token });
+      void (async () => {
+        // Tauri 的事件监听注册本身是异步的。必须先等 listener 就绪再让 Rust
+        // 建立连接，否则很快到达的 session.ready 或连接错误会永久丢失。
+        await setupTauriListeners(handlers);
+        if (generation !== connectionGeneration) return;
+        await tauriInvoke("realtime_connect", { wsBaseUrl: wsBaseURL, token });
+      })().catch((error) => {
+        if (generation !== connectionGeneration) return;
+        handlers.onStatusChange("error");
+        handlers.onError(
+          error instanceof Error ? error.message : String(error),
+        );
+      });
     },
     disconnect() {
+      connectionGeneration += 1;
       unlistenEvent?.();
       unlistenStatus?.();
       unlistenReconnect?.();

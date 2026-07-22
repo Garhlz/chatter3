@@ -1,6 +1,8 @@
+import { X } from "lucide-react";
 import { t, type Language } from "../i18n";
 import { useChatStore } from "../store/chatStore";
 import type { ThemeMode } from "../theme";
+import { IconButton } from "./ui/IconButton";
 
 export function SettingsModal({
   onClose,
@@ -18,6 +20,9 @@ export function SettingsModal({
     <div className="modal-overlay" onClick={onClose}>
       <div
         className="modal-panel settings-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label={t(language, "settings.title")}
         onClick={(e) => e.stopPropagation()}
       >
         <header className="panel-header">
@@ -25,13 +30,7 @@ export function SettingsModal({
             <p className="section-label">{t(language, "settings.label")}</p>
             <h2>{t(language, "settings.title")}</h2>
           </div>
-          <button
-            type="button"
-            className="secondary-button compact-button"
-            onClick={onClose}
-          >
-            ×
-          </button>
+          <IconButton icon={X} label={t(language, "feedback.dismiss")} onClick={onClose} />
         </header>
 
         <div className="settings-body">
