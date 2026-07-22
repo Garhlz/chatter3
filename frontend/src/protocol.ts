@@ -106,6 +106,26 @@ export type UploadResponse = {
   file: FileAttachment;
 };
 
+export type UploadTarget =
+  | { scope: "public" }
+  | { scope: "private"; receiverUsername: string }
+  | { scope: "group"; groupID: number };
+
+export type ProfileData = {
+  user: CurrentUser;
+  backgroundUrl?: string;
+  bio: string;
+  gender: number;
+  createdAt: string;
+  email?: string;
+};
+
+export type ProfileImageKind = "avatar" | "background";
+
+export type ProfileChangedPayload = {
+  profile: ProfileData;
+};
+
 export type SocketEvent<TPayload> = {
   event: string;
   requestId?: string;

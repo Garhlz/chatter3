@@ -164,6 +164,7 @@ pub fn run() {
             api::api_update_user_profile,
             api::api_get_group_history,
             api::api_upload_file,
+            api::api_upload_profile_image,
             api::api_download_file_bytes,
             api::api_save_file,
             realtime::realtime_connect,

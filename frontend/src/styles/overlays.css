@@ -81,6 +81,35 @@
   display: flex;
   align-items: center;
   gap: 15px;
+  padding: 0 18px 18px;
+  margin-top: -28px;
+}
+
+.profile-space {
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: 16px;
+  background: var(--color-surface-raised);
+}
+
+.profile-cover {
+  height: 92px;
+  background:
+    radial-gradient(circle at 78% 25%, color-mix(in srgb, var(--color-accent) 34%, transparent), transparent 28%),
+    linear-gradient(135deg, var(--color-accent-soft), var(--color-surface-hover));
+  background-position: center;
+  background-size: cover;
+}
+
+.profile-media-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.profile-hero > .avatar {
+  border: 4px solid var(--color-surface-raised);
+  box-sizing: content-box;
 }
 
 .profile-avatar {
@@ -119,6 +148,19 @@
 .profile-field {
   display: grid;
   gap: 3px;
+}
+
+.profile-bio {
+  padding: 14px;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: var(--color-surface-raised);
+}
+
+.profile-bio p {
+  margin: 4px 0 0;
+  line-height: 1.65;
+  white-space: pre-wrap;
 }
 
 .profile-field > span:first-child {

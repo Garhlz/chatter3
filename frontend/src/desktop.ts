@@ -2,6 +2,7 @@
 // 这样 npm run dev 远程开发不受影响，打包成 Tauri 应用时自动用原生能力。
 
 import { createAPIClient as createJsApiClient } from "./api/client";
+import { httpBaseURL } from "./config";
 import type { RealtimeStatus } from "./realtime/client";
 import type {
   LoginResponse,
@@ -14,6 +15,9 @@ import type {
   CreateGroupResponse,
   AddGroupMemberRequest,
   UploadResponse,
+  UploadTarget,
+  ProfileData,
+  ProfileImageKind,
 } from "./protocol";
 
 let isTauri: boolean | null = null;
@@ -23,6 +27,29 @@ export function runningInTauri(): boolean {
     isTauri = "__TAURI_INTERNALS__" in window;
   }
   return isTauri;
+}
+
+// 后端返回的资料图片是 API 相对路径。浏览器开发模式保留相对路径交给
+// Vite proxy；Tauri 则补上运行时后端地址，避免图片请求落到 WebView 自身。
+export function resolveAPIResourceURL(path: string): string {
+  if (!path || /^(https?:|data:|blob:)/.test(path)) return path;
+  return `${httpBaseURL}${path}`;
+}
+
+// 浏览器可以通过 <input type="file"> 取得 File 对象；Tauri 则更适合让
+// 原生文件选择器返回路径，再由 Rust 读取并上传。这样文件内容不会受 WebView
+// 的网络与本地文件访问限制影响。
+export async function selectDesktopFilePath(options?: { imagesOnly?: boolean }): Promise<string | null> {
+  if (!runningInTauri()) return null;
+  const { open } = await import("@tauri-apps/plugin-dialog");
+  const selected = await open({
+    multiple: false,
+    directory: false,
+    ...(options?.imagesOnly
+      ? { filters: [{ name: "Images", extensions: ["jpg", "jpeg", "png"] }] }
+      : {}),
+  });
+  return typeof selected === "string" ? selected : null;
 }
 
 export type DesktopWindowState = {
@@ -214,11 +241,23 @@ export async function loadToken(): Promise<string | null> {
 }
 
 export async function clearToken(): Promise<void> {
+  let firstError: unknown;
   if (runningInTauri()) {
-    await invokeDesktopCommand<void>("clear_desktop_token");
-    await deleteStoreValue(TOKEN_KEY);
+    try {
+      await invokeDesktopCommand<void>("clear_desktop_token");
+    } catch (error) {
+      firstError = error;
+    }
+    try {
+      await deleteStoreValue(TOKEN_KEY);
+    } catch (error) {
+      firstError ??= error;
+    }
   }
+  // 即使系统凭据库不可用，也继续清理旧版 store/localStorage，尽量减少
+  // 下次启动恢复出已退出 token 的机会。最后再把首个错误交给状态层展示。
   localStorage.removeItem(TOKEN_KEY);
+  if (firstError) throw firstError;
 }
 
 // ── SQLite 消息持久化 ──
@@ -487,10 +526,15 @@ export function createUnifiedAPI(baseURL: string) {
       }
       return jsApi.getGroupHistoryPage(token, groupID, cursor);
     },
-    uploadFileFromPath: (token: string, filePath: string, receiverUsername?: string) =>
-      tauriInvoke<UploadResponse>("api_upload_file", { token, filePath, receiverUsername: receiverUsername ?? null }),
-    uploadFile: (token: string, file: File, receiverUsername?: string) =>
-      jsApi.uploadFile(token, file, receiverUsername),
+    uploadFileFromPath: (token: string, filePath: string, target: UploadTarget) =>
+      tauriInvoke<UploadResponse>("api_upload_file", {
+        token,
+        filePath,
+        receiverUsername: target.scope === "private" ? target.receiverUsername : null,
+        groupId: target.scope === "group" ? target.groupID : null,
+      }),
+    uploadFile: (token: string, file: File, target: UploadTarget) =>
+      jsApi.uploadFile(token, file, target),
     getProfile: (token: string, username: string) =>
       runningInTauri()
         ? tauriInvoke<ProfileData>("api_get_user_profile", { token, username })
@@ -499,6 +543,10 @@ export function createUnifiedAPI(baseURL: string) {
       runningInTauri()
         ? tauriInvoke<ProfileData>("api_update_user_profile", { token, username, payload })
         : jsApi.updateProfile(token, username, payload),
+    uploadProfileImage: (token: string, username: string, kind: ProfileImageKind, file: File) =>
+      jsApi.uploadProfileImage(token, username, kind, file),
+    uploadProfileImageFromPath: (token: string, username: string, kind: ProfileImageKind, filePath: string) =>
+      tauriInvoke<ProfileData>("api_upload_profile_image", { token, username, kind, filePath }),
     getDownloadURL: (fileID: number) =>
       `${baseURL}/api/v2/files/${fileID}`,
   };
@@ -528,14 +576,6 @@ export async function saveDesktopFile(
   return true;
 }
 
-type ProfileData = {
-  user: CurrentUser;
-  bio: string;
-  gender: number;
-  createdAt: string;
-  email?: string;
-};
-
 // ── Unified Realtime (Tauri WS / browser WebSocket fallback) ──
 
 import { createRealtimeClient as createJsRealtimeClient } from "./realtime/client";
@@ -550,6 +590,7 @@ export function createUnifiedRealtime(wsBaseURL: string) {
   let unlistenEvent: Unlisten | null = null;
   let unlistenStatus: Unlisten | null = null;
   let unlistenReconnect: Unlisten | null = null;
+  let unlistenError: Unlisten | null = null;
   let connectionGeneration = 0;
 
   async function setupTauriListeners(
@@ -558,6 +599,7 @@ export function createUnifiedRealtime(wsBaseURL: string) {
     unlistenEvent?.();
     unlistenStatus?.();
     unlistenReconnect?.();
+    unlistenError?.();
 
     const { listen } = await import("@tauri-apps/api/event");
 
@@ -586,6 +628,9 @@ export function createUnifiedRealtime(wsBaseURL: string) {
             // React/Zustand 处理，因此浏览器模式和 Tauri 模式共用同一套语义。
             handlers.onGroupChanged(data.payload);
             break;
+          case "user.profile.changed":
+            handlers.onProfileChanged(data.payload);
+            break;
           case "error":
             handlers.onError(data.payload.message, data.payload.code);
             break;
@@ -612,6 +657,17 @@ export function createUnifiedRealtime(wsBaseURL: string) {
         }>(event.payload);
         handlers.onReconnectScheduled?.(attempt, delayMs);
       } catch { /* ignore */ }
+    });
+
+    // Rust realtime 会提供比浏览器 onerror 更具体的连接/关闭原因。
+    // 之前没有监听这个事件，导致桌面端只看到“正在重连”而看不到根因。
+    unlistenError = await listen<{ message: string } | string>("realtime://error", (event) => {
+      try {
+        const { message } = normalizeTauriPayload<{ message: string }>(event.payload);
+        handlers.onError(message);
+      } catch {
+        handlers.onError("Realtime connection failed");
+      }
     });
   }
 
@@ -642,6 +698,7 @@ export function createUnifiedRealtime(wsBaseURL: string) {
       unlistenEvent?.();
       unlistenStatus?.();
       unlistenReconnect?.();
+      unlistenError?.();
       void tauriInvoke("realtime_disconnect");
     },
     async sendPublicMessage(payload: { content: string }, requestId?: string) {

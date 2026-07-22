@@ -5,6 +5,7 @@ import type {
   PresencePayload,
   PrivateSendPayload,
   PublicSendPayload,
+  ProfileChangedPayload,
   RealtimeErrorPayload,
   SessionReadyPayload,
   SocketEvent,
@@ -26,6 +27,7 @@ type RealtimeHandlers = {
   onPrivateMessage: (message: ChatMessage, requestId?: string) => void;
   onGroupMessage: (message: ChatMessage, requestId?: string) => void;
   onGroupChanged: (payload: GroupChangedPayload) => void;
+  onProfileChanged: (payload: ProfileChangedPayload) => void;
   onReconnectScheduled?: (attempt: number, delayMs: number) => void;
 };
 
@@ -39,6 +41,7 @@ export function createRealtimeClient(baseURL: string) {
   let pingTimer: number | null = null;
   let reconnectTimer: number | null = null;
   let reconnectAttempt = 0;
+  let stableConnectionTimer: number | null = null;
   let manualClose = false;
   let activeToken = "";
   let activeHandlers: RealtimeHandlers | null = null;
@@ -58,6 +61,13 @@ export function createRealtimeClient(baseURL: string) {
     if (reconnectTimer !== null) {
       window.clearTimeout(reconnectTimer);
       reconnectTimer = null;
+    }
+  }
+
+  function stopStableConnectionTimer() {
+    if (stableConnectionTimer !== null) {
+      window.clearTimeout(stableConnectionTimer);
+      stableConnectionTimer = null;
     }
   }
 
@@ -98,6 +108,7 @@ export function createRealtimeClient(baseURL: string) {
 
       stopPing();
       stopReconnect();
+      stopStableConnectionTimer();
       if (socket) {
         socket.onclose = null;
         socket.onerror = null;
@@ -106,8 +117,13 @@ export function createRealtimeClient(baseURL: string) {
       socket = new WebSocket(url);
 
       socket.onopen = () => {
-        reconnectAttempt = 0;
         handlers.onStatusChange("connected");
+        // WebSocket 握手成功不等于连接已经稳定。如果服务端很快关闭连接，
+        // 立即清零会让每次重连永远都显示为“第一次尝试”，也绕过最大次数。
+        stableConnectionTimer = window.setTimeout(() => {
+          reconnectAttempt = 0;
+          stableConnectionTimer = null;
+        }, 10_000);
         pingTimer = window.setInterval(() => {
           sendEvent("session.ping", {});
         }, 30_000);
@@ -115,6 +131,7 @@ export function createRealtimeClient(baseURL: string) {
 
       socket.onclose = () => {
         stopPing();
+        stopStableConnectionTimer();
         if (manualClose || !activeToken || !activeHandlers) {
           handlers.onStatusChange("closed");
           return;
@@ -180,6 +197,9 @@ export function createRealtimeClient(baseURL: string) {
             case "group.changed":
               handlers.onGroupChanged(payload.payload as GroupChangedPayload);
               break;
+            case "user.profile.changed":
+              handlers.onProfileChanged(payload.payload as ProfileChangedPayload);
+              break;
             case "error":
               handlers.onError(
                 (payload.payload as RealtimeErrorPayload).message,
@@ -196,6 +216,8 @@ export function createRealtimeClient(baseURL: string) {
       manualClose = true;
       stopPing();
       stopReconnect();
+      stopStableConnectionTimer();
+      reconnectAttempt = 0;
       socket?.close();
       socket = null;
     },

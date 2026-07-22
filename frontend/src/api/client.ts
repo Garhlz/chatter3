@@ -13,6 +13,9 @@ import type {
   OnlineUser,
   RegisterRequest,
   UploadResponse,
+  UploadTarget,
+  ProfileData,
+  ProfileImageKind,
 } from "../protocol";
 
 type HTTPMethod = "GET" | "POST" | "PUT" | "DELETE";
@@ -196,12 +199,15 @@ export function createAPIClient(baseURL: string) {
     uploadFile: async (
       token: string,
       file: File,
-      receiverUsername?: string,
+      target: UploadTarget,
     ): Promise<UploadResponse> => {
       const formData = new FormData();
       formData.append("file", file);
-      if (receiverUsername) {
-        formData.append("receiverUsername", receiverUsername);
+      if (target.scope === "private") {
+        formData.append("receiverUsername", target.receiverUsername);
+      }
+      if (target.scope === "group") {
+        formData.append("groupID", String(target.groupID));
       }
 
       const response = await fetch(`${baseURL}/api/v2/files/upload`, {
@@ -225,13 +231,7 @@ export function createAPIClient(baseURL: string) {
       return (data as APIResponse<UploadResponse>).data;
     },
     getProfile: (token: string, username: string) =>
-      request<{
-        user: CurrentUser;
-        bio: string;
-        gender: number;
-        createdAt: string;
-        email?: string;
-      }>(
+      request<ProfileData>(
         `/api/v2/users/${encodeURIComponent(username)}/profile`,
         "GET",
         undefined,
@@ -247,18 +247,33 @@ export function createAPIClient(baseURL: string) {
         gender?: number;
       },
     ) =>
-      request<{
-        user: CurrentUser;
-        bio: string;
-        gender: number;
-        createdAt: string;
-        email?: string;
-      }>(
+      request<ProfileData>(
         `/api/v2/users/${encodeURIComponent(username)}/profile`,
         "PUT",
         payload,
         token,
       ),
+    uploadProfileImage: async (
+      token: string,
+      username: string,
+      kind: ProfileImageKind,
+      file: File,
+    ): Promise<ProfileData> => {
+      const formData = new FormData();
+      formData.append("file", file);
+      const response = await fetch(
+        `${baseURL}/api/v2/users/${encodeURIComponent(username)}/${kind}`,
+        { method: "PUT", headers: { Authorization: `Bearer ${token}` }, body: formData },
+      );
+      const data = (await response.json()) as APIResponse<ProfileData> | APIErrorResponse;
+      if (!response.ok) {
+        const error = "error" in data
+          ? data.error
+          : { code: `http_${response.status}`, message: `HTTP ${response.status}` };
+        throw new APIClientError(error.message, error.code, response.status);
+      }
+      return (data as APIResponse<ProfileData>).data;
+    },
     getDownloadURL,
   };
 

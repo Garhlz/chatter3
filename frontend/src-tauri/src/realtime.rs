@@ -94,6 +94,7 @@ async fn realtime_loop(
     let max_reconnect: u32 = 6;
     let base_delay_ms: u64 = 900;
     let mut attempt: u32 = 0;
+    let stable_connection_duration = tokio::time::Duration::from_secs(10);
 
     loop {
         if *cancel_rx.borrow() {
@@ -103,7 +104,7 @@ async fn realtime_loop(
 
         match tokio_tungstenite::connect_async(&ws_url).await {
             Ok((mut ws_stream, _)) => {
-                attempt = 0;
+                let connected_at = tokio::time::Instant::now();
                 let _ = app.emit(
                     "realtime://status",
                     serde_json::json!({"status": "connected"}),
@@ -160,6 +161,12 @@ async fn realtime_loop(
                             }
                         }
                     }
+                }
+
+                // 与浏览器 client 保持相同语义：握手后至少稳定十秒才认为
+                // 上一次故障已经恢复。短连接不能清空 attempt，否则会无限重试。
+                if connected_at.elapsed() >= stable_connection_duration {
+                    attempt = 0;
                 }
             }
             Err(e) => {

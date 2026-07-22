@@ -1,4 +1,5 @@
 import type { CurrentUser } from "../../protocol";
+import { resolveAPIResourceURL } from "../../desktop";
 
 type AvatarUser = Pick<CurrentUser, "username" | "nickname" | "avatarUrl">;
 
@@ -16,7 +17,7 @@ export function Avatar({
   return (
     <span className={`avatar avatar-${size}`} aria-hidden="true">
       {user.avatarUrl ? (
-        <img src={user.avatarUrl} alt="" />
+        <img src={resolveAPIResourceURL(user.avatarUrl)} alt="" />
       ) : (
         <span className="avatar-fallback">{fallback || "?"}</span>
       )}

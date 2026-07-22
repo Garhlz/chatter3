@@ -384,6 +384,8 @@ pub async fn api_create_group(
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct UserProfileResponse {
     pub user: User,
+    #[serde(rename = "backgroundUrl", default)]
+    pub background_url: Option<String>,
     pub bio: String,
     pub gender: i16,
     #[serde(rename = "createdAt")]
@@ -551,6 +553,7 @@ pub async fn api_upload_file(
     token: String,
     file_path: String,
     receiver_username: Option<String>,
+    group_id: Option<i64>,
 ) -> Result<UploadResponse, String> {
     let (client, base_url) = {
         let h = http.lock().map_err(|e| format!("lock: {e}"))?;
@@ -566,6 +569,9 @@ pub async fn api_upload_file(
     if let Some(ref recv) = receiver_username {
         form = form.text("receiverUsername", recv.clone());
     }
+    if let Some(id) = group_id {
+        form = form.text("groupID", id.to_string());
+    }
     let resp = client
         .post(format!("{base_url}/api/v2/files/upload"))
         .bearer_auth(&token)
@@ -579,6 +585,51 @@ pub async fn api_upload_file(
         return Err(format!("HTTP {status}: {body}"));
     }
     let data: ApiEnvelope<UploadResponse> = resp.json().await.map_err(|e| format!("json: {e}"))?;
+    Ok(data.data)
+}
+
+#[tauri::command]
+pub async fn api_upload_profile_image(
+    http: tauri::State<'_, Mutex<HttpClient>>,
+    token: String,
+    username: String,
+    kind: String,
+    file_path: String,
+) -> Result<UserProfileResponse, String> {
+    if kind != "avatar" && kind != "background" {
+        return Err("profile image kind must be avatar or background".to_string());
+    }
+    let (client, base_url) = {
+        let h = http.lock().map_err(|e| format!("lock: {e}"))?;
+        (h.client.clone(), h.base_url.clone())
+    };
+    let file_bytes = std::fs::read(&file_path).map_err(|e| format!("read file: {e}"))?;
+    let file_name = std::path::Path::new(&file_path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("profile-image")
+        .to_string();
+    let form = reqwest::multipart::Form::new().part(
+        "file",
+        reqwest::multipart::Part::bytes(file_bytes).file_name(file_name),
+    );
+    let encoded_username = encode_path_segment(&username);
+    let response = client
+        .put(format!("{base_url}/api/v2/users/{encoded_username}/{kind}"))
+        .bearer_auth(&token)
+        .multipart(form)
+        .send()
+        .await
+        .map_err(|error| format!("upload profile image: {error}"))?;
+    if !response.status().is_success() {
+        let status = response.status().as_u16();
+        let body = response.text().await.unwrap_or_default();
+        return Err(format!("HTTP {status}: {body}"));
+    }
+    let data: ApiEnvelope<UserProfileResponse> = response
+        .json()
+        .await
+        .map_err(|error| format!("json: {error}"))?;
     Ok(data.data)
 }
 

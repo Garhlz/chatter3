@@ -15,6 +15,7 @@ export function SettingsModal({
   const themeMode = useChatStore((state) => state.themeMode);
   const setLanguage = useChatStore((state) => state.setLanguage);
   const setThemeMode = useChatStore((state) => state.setThemeMode);
+  const logout = useChatStore((state) => state.logout);
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -69,6 +70,17 @@ export function SettingsModal({
             onClick={() => { onOpenDev(); onClose(); }}
           >
             {t(language, "settings.devPanel")}
+          </button>
+
+          <button
+            type="button"
+            className="primary-button danger-button"
+            onClick={() => {
+              onClose();
+              void logout();
+            }}
+          >
+            {t(language, "settings.logout")}
           </button>
         </div>
       </div>

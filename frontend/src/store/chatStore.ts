@@ -45,6 +45,8 @@ import type {
   LoginRequest,
   OnlineUser,
   RegisterRequest,
+  ProfileData,
+  UploadTarget,
 } from "../protocol";
 import {
   activeView,
@@ -87,6 +89,7 @@ type ChatState = {
   onlineUsers: OnlineUser[];
   draftsByConversation: Record<string, string>;
   groups: Group[];
+  profilesByUsername: Record<string, ProfileData>;
   newGroupName: string;
   newGroupMembers: string;
   uploadingCount: number;
@@ -102,6 +105,7 @@ type ChatState = {
   setConversationScrollTop: (conversationId: string, scrollTop: number) => void;
   login: () => Promise<void>;
   register: () => Promise<void>;
+  logout: () => Promise<void>;
   loadPublicHistory: () => Promise<void>;
   loadPrivateHistory: (username?: string) => Promise<void>;
   loadOlderHistory: () => Promise<void>;
@@ -124,7 +128,8 @@ type ChatState = {
   loadGroupHistory: (groupID: number) => Promise<void>;
   addGroupMembers: (groupID: number, usernames: string[]) => Promise<void>;
   removeGroupMember: (groupID: number, username: string) => Promise<void>;
-  uploadFile: (file: File, receiverUsername?: string) => Promise<void>;
+  uploadFile: (file: File, target: UploadTarget) => Promise<void>;
+  uploadFileFromPath: (filePath: string, target: UploadTarget) => Promise<void>;
   bootstrapSession: () => Promise<void>;
   setLanguage: (language: Language) => void;
   setThemeMode: (themeMode: ThemeMode) => void;
@@ -575,6 +580,7 @@ function connectionHandlers() {
         currentUser: payload.user,
         status: "connected",
         reconnectAttempt: 0,
+        error: "",
       });
     },
     onPresence: ({ user }: { user: OnlineUser }) => {
@@ -672,13 +678,65 @@ function connectionHandlers() {
         fireAndForget(useChatStore.getState().loadGroupHistory(group.groupID));
       }
     },
+    onProfileChanged: ({ profile }: { profile: ProfileData }) => {
+      useChatStore.setState((state) => {
+        const username = profile.user.username;
+        const existingProfile = state.profilesByUsername[username];
+        const mergedProfile: ProfileData = {
+          ...profile,
+          ...(existingProfile?.email ? { email: existingProfile.email } : {}),
+        };
+        const patchUser = <T extends CurrentUser>(user: T): T =>
+          user.username === username
+            ? { ...user, ...profile.user }
+            : user;
+        const messagesByConversation = Object.fromEntries(
+          Object.entries(state.messagesByConversation).map(([id, messages]) => [
+            id,
+            messages.map((message) => ({
+              ...message,
+              sender: patchUser(message.sender),
+            })),
+          ]),
+        );
+        const conversations = Object.fromEntries(
+          Object.entries(state.conversations).map(([id, conversation]) => [
+            id,
+            {
+              ...conversation,
+              ...(conversation.peerUsername === username
+                ? { title: profile.user.nickname, peerNickname: profile.user.nickname }
+                : {}),
+              members: conversation.members?.map((member) => ({
+                ...member,
+                user: patchUser(member.user),
+              })),
+              ...(conversation.creatorUsername === username
+                ? { creatorNickname: profile.user.nickname }
+                : {}),
+            },
+          ]),
+        );
+        return {
+          currentUser: state.currentUser
+            ? patchUser(state.currentUser)
+            : null,
+          onlineUsers: state.onlineUsers.map((user) => patchUser(user)),
+          messagesByConversation,
+          conversations,
+          profilesByUsername: {
+            ...state.profilesByUsername,
+            [username]: mergedProfile,
+          },
+        };
+      });
+    },
     onReconnectScheduled: (attempt: number, delayMs: number) => {
+      // 重连属于持续状态，不是一次性成功通知。Composer 和标题栏会显示它，
+      // 因此这里不再反复写 notice 触发 Toast 闪烁。
+      void delayMs;
       useChatStore.setState({
         reconnectAttempt: attempt,
-        notice: localized("notice.reconnectScheduled", {
-          attempt,
-          seconds: Math.round(delayMs / 1000),
-        }),
       });
     },
   };
@@ -760,6 +818,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   onlineUsers: [],
   draftsByConversation: {},
   groups: [],
+  profilesByUsername: {},
   newGroupName: "",
   newGroupMembers: "",
   uploadingCount: 0,
@@ -900,6 +959,46 @@ export const useChatStore = create<ChatState>((set, get) => ({
     } catch (err) {
       const message = err instanceof Error ? err.message : t(get().language, "error.registerFailed");
       set({ error: message });
+    }
+  },
+  logout: async () => {
+    // 先主动关闭实时连接，避免清空身份后旧 WebSocket 仍把事件写回 store。
+    // 内存状态必须先清空，不能让 Keychain 等外部存储的失败把 UI 卡在半退出状态。
+    realtime.disconnect();
+    set({
+      token: "",
+      currentUser: null,
+      status: "idle",
+      reconnectAttempt: 0,
+      messagesByConversation: { [publicConversationId]: initialMessages },
+      conversations: { [publicConversationId]: publicConversation(initialMessages) },
+      activeConversationId: publicConversationId,
+      historyCursors: {},
+      historyLoading: false,
+      scrollPositions: {},
+      error: "",
+      authExpired: false,
+      notice: "",
+      lastSelectedFile: "",
+      historyTarget: "",
+      onlineUsers: [],
+      draftsByConversation: {},
+      groups: [],
+      profilesByUsername: {},
+      newGroupName: "",
+      newGroupMembers: "",
+      uploadingCount: 0,
+    });
+    try {
+      await clearToken();
+    } catch (err) {
+      // 用户已经从当前会话退出，但持久化 token 可能仍在，所以下次启动存在
+      // 自动恢复的风险。把它作为登录页可见错误报告，而不是重新恢复登录态。
+      set({
+        error: t(get().language, "error.clearLogoutCredential", {
+          reason: err instanceof Error ? err.message : String(err),
+        }),
+      });
     }
   },
 
@@ -1333,9 +1432,21 @@ export const useChatStore = create<ChatState>((set, get) => ({
     if (!token) { set({ error: t(get().language, "error.loginBeforeManageGroup") }); return; }
     try {
       set({ error: "" });
-      await api.addGroupMembers(token, groupID, { usernames });
-      set({ notice: t(get().language, "notice.membersAdded", { count: usernames.length }) });
-      await get().loadGroupHistory(groupID);
+      const members = await api.addGroupMembers(token, groupID, { usernames });
+      set((state) => {
+        const cid = conversationIdFor("group", String(groupID));
+        const conversation = state.conversations[cid];
+        return {
+          notice: t(state.language, "notice.membersAdded", { count: usernames.length }),
+          conversations: conversation
+            ? {
+                ...state.conversations,
+                [cid]: { ...conversation, members, memberCount: members.length },
+              }
+            : state.conversations,
+        };
+      });
+      fireAndForget(get().loadGroupHistory(groupID));
     } catch (err) {
       if (isUnauthorizedError(err)) { expireSession(); return; }
       set({ error: err instanceof Error ? err.message : t(get().language, "error.addMembers") });
@@ -1347,8 +1458,30 @@ export const useChatStore = create<ChatState>((set, get) => ({
     try {
       set({ error: "" });
       await api.removeGroupMember(token, groupID, username);
-      set({ notice: t(get().language, "notice.memberRemoved", { name: username }) });
-      await get().loadGroupHistory(groupID);
+      // 删除接口没有返回群成员列表，因此先依据已知用户名更新本地状态，
+      // 让面板立即响应；随后后台拉取一次服务端数据做最终校准。
+      set((state) => {
+        const cid = conversationIdFor("group", String(groupID));
+        const conversation = state.conversations[cid];
+        const members = conversation?.members?.filter(
+          (member) => member.user.username !== username,
+        );
+        return {
+          notice: t(state.language, "notice.memberRemoved", { name: username }),
+          conversations: conversation
+            ? {
+                ...state.conversations,
+                [cid]: {
+                  ...conversation,
+                  members,
+                  memberCount:
+                    members?.length ?? Math.max(0, (conversation.memberCount ?? 0) - 1),
+                },
+              }
+            : state.conversations,
+        };
+      });
+      fireAndForget(get().loadGroupHistory(groupID));
     } catch (err) {
       if (isUnauthorizedError(err)) { expireSession(); return; }
       set({ error: err instanceof Error ? err.message : t(get().language, "error.removeMember") });
@@ -1356,12 +1489,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   // ── File ──
-  uploadFile: async (file, receiverUsername) => {
+  uploadFile: async (file, target) => {
     const { token } = get();
     if (!token) { set({ error: t(get().language, "error.loginBeforeUpload") }); return; }
     try {
       set((s) => ({ error: "", uploadingCount: s.uploadingCount + 1, lastSelectedFile: file.name }));
-      await api.uploadFile(token, file, receiverUsername);
+      await api.uploadFile(token, file, target);
       set((s) => ({
         uploadingCount: s.uploadingCount - 1,
         lastSelectedFile: "",
@@ -1372,6 +1505,28 @@ export const useChatStore = create<ChatState>((set, get) => ({
       set((s) => ({
         error: err instanceof Error ? err.message : t(s.language, "error.uploadFile"),
         uploadingCount: s.uploadingCount - 1,
+      }));
+    }
+  },
+
+  uploadFileFromPath: async (filePath, target) => {
+    const { token } = get();
+    if (!token) { set({ error: t(get().language, "error.loginBeforeUpload") }); return; }
+    // 路径只用于 Rust 侧读取文件。界面上仅显示末尾文件名，避免暴露本机目录。
+    const fileName = filePath.split(/[\\/]/).pop() || filePath;
+    try {
+      set((state) => ({ error: "", uploadingCount: state.uploadingCount + 1, lastSelectedFile: fileName }));
+      await api.uploadFileFromPath(token, filePath, target);
+      set((state) => ({
+        uploadingCount: state.uploadingCount - 1,
+        lastSelectedFile: "",
+        notice: t(state.language, "notice.fileUploaded", { name: fileName }),
+      }));
+    } catch (err) {
+      if (isUnauthorizedError(err)) { expireSession(); return; }
+      set((state) => ({
+        error: err instanceof Error ? err.message : t(state.language, "error.uploadFile"),
+        uploadingCount: Math.max(0, state.uploadingCount - 1),
       }));
     }
   },

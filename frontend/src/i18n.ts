@@ -84,7 +84,6 @@ type TranslationKey =
   | "chat.offline"
   | "chat.uploading"
   | "chat.attachFile"
-  | "chat.groupFilesUnsupported"
   | "chat.newMessages"
   | "chat.selected"
   | "chat.emptyKicker"
@@ -166,6 +165,7 @@ type TranslationKey =
   | "error.loginBeforeManageGroup"
   | "error.loginBeforeUpload"
   | "error.uploadFile"
+  | "error.clearLogoutCredential"
   | "error.restoreSession"
   | "auth.usernamePlaceholder"
   | "auth.passwordPlaceholder"
@@ -205,6 +205,11 @@ type TranslationKey =
   | "profile.saveError"
   | "profile.notFound"
   | "profile.startConversation"
+  | "profile.bioEmpty"
+  | "profile.changeAvatar"
+  | "profile.changeBackground"
+  | "profile.uploadingImage"
+  | "profile.imageUploadError"
   | "conv.emptyPrivate"
   | "group.roleOwner"
   | "group.roleAdmin"
@@ -216,7 +221,8 @@ type TranslationKey =
   | "settings.title"
   | "settings.language"
   | "settings.theme"
-  | "settings.devPanel";
+  | "settings.devPanel"
+  | "settings.logout";
 
 const dictionaries: Record<Language, Record<TranslationKey, string>> = {
   "zh-CN": {
@@ -305,7 +311,6 @@ const dictionaries: Record<Language, Record<TranslationKey, string>> = {
     "chat.offline": "离线",
     "chat.uploading": "上传中...",
     "chat.attachFile": "添加文件",
-    "chat.groupFilesUnsupported": "群文件暂未支持",
     "chat.newMessages": "{count} 条新消息",
     "chat.selected": "已选择：{file}",
     "chat.emptyKicker": "暂无消息",
@@ -386,6 +391,7 @@ const dictionaries: Record<Language, Record<TranslationKey, string>> = {
     "error.loginBeforeManageGroup": "请先登录再管理群成员。",
     "error.loginBeforeUpload": "请先登录再上传文件。",
     "error.uploadFile": "上传文件失败",
+    "error.clearLogoutCredential": "已退出登录，但本地凭据删除失败：{reason}",
     "auth.dismiss": "关闭",
     "conv.search": "搜索会话...",
     "conv.createGroup": "创建群聊",
@@ -422,6 +428,11 @@ const dictionaries: Record<Language, Record<TranslationKey, string>> = {
     "profile.saveError": "保存资料失败",
     "profile.notFound": "用户不存在",
     "profile.startConversation": "发起聊天",
+    "profile.bioEmpty": "这个人还没有写自我介绍。",
+    "profile.changeAvatar": "修改头像",
+    "profile.changeBackground": "修改背景",
+    "profile.uploadingImage": "上传中...",
+    "profile.imageUploadError": "资料图片上传失败",
     "conv.emptyPrivate": "与 @{name} 的私聊",
     "group.createdBy": "创建者 @{name}",
     "group.roleOwner": "群主",
@@ -435,6 +446,7 @@ const dictionaries: Record<Language, Record<TranslationKey, string>> = {
     "settings.language": "语言",
     "settings.theme": "主题",
     "settings.devPanel": "开发者面板",
+    "settings.logout": "退出登录",
     "error.restoreSession": "恢复保存会话失败",
   },
   "en-US": {
@@ -523,7 +535,6 @@ const dictionaries: Record<Language, Record<TranslationKey, string>> = {
     "chat.offline": "Offline",
     "chat.uploading": "Uploading...",
     "chat.attachFile": "Attach file",
-    "chat.groupFilesUnsupported": "Group file sharing is not supported yet",
     "chat.newMessages": "{count} new messages",
     "chat.selected": "Selected: {file}",
     "chat.emptyKicker": "No messages",
@@ -604,6 +615,7 @@ const dictionaries: Record<Language, Record<TranslationKey, string>> = {
     "error.loginBeforeManageGroup": "Log in before managing group members.",
     "error.loginBeforeUpload": "Log in before uploading files.",
     "error.uploadFile": "Failed to upload file",
+    "error.clearLogoutCredential": "Signed out, but failed to delete the saved credential: {reason}",
     "auth.dismiss": "Dismiss",
     "conv.search": "Search conversations...",
     "conv.createGroup": "Create group",
@@ -640,6 +652,11 @@ const dictionaries: Record<Language, Record<TranslationKey, string>> = {
     "profile.saveError": "Failed to save profile",
     "profile.notFound": "User not found",
     "profile.startConversation": "Start chat",
+    "profile.bioEmpty": "No bio has been added yet.",
+    "profile.changeAvatar": "Change avatar",
+    "profile.changeBackground": "Change background",
+    "profile.uploadingImage": "Uploading...",
+    "profile.imageUploadError": "Failed to upload profile image",
     "conv.emptyPrivate": "Private with @{name}",
     "group.createdBy": "Created by @{name}",
     "group.roleOwner": "Group owner",
@@ -653,6 +670,7 @@ const dictionaries: Record<Language, Record<TranslationKey, string>> = {
     "settings.language": "Language",
     "settings.theme": "Theme",
     "settings.devPanel": "Developer panel",
+    "settings.logout": "Log out",
     "error.restoreSession": "Failed to restore saved session",
   },
 };

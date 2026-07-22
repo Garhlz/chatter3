@@ -1,8 +1,10 @@
 import { LoaderCircle, Paperclip, Send } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { t } from "../i18n";
+import { runningInTauri, selectDesktopFilePath } from "../desktop";
 import { useChatStore } from "../store/chatStore";
 import { IconButton } from "./ui/IconButton";
+import type { UploadTarget } from "../protocol";
 
 export function Composer() {
   const language = useChatStore((state) => state.language);
@@ -21,6 +23,7 @@ export function Composer() {
   const setDraft = useChatStore((state) => state.setDraft);
   const sendMessage = useChatStore((state) => state.sendMessage);
   const uploadFile = useChatStore((state) => state.uploadFile);
+  const uploadFileFromPath = useChatStore((state) => state.uploadFileFromPath);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const composingRef = useRef(false);
@@ -50,15 +53,43 @@ export function Composer() {
     event.target.value = "";
     if (!file || !activeConversation) return;
     setLocalFileError("");
-    const receiver =
-      activeConversation.scope === "private"
-        ? activeConversation.peerUsername
-        : undefined;
+    const target = uploadTarget();
+    if (!target) return;
     try {
-      await uploadFile(file, receiver);
+      await uploadFile(file, target);
     } catch (error) {
       setLocalFileError(error instanceof Error ? error.message : String(error));
     }
+  }
+
+  async function handleAttach() {
+    if (!activeConversation) return;
+    if (!runningInTauri()) {
+      fileInputRef.current?.click();
+      return;
+    }
+
+    setLocalFileError("");
+    try {
+      const filePath = await selectDesktopFilePath();
+      if (!filePath) return;
+      const target = uploadTarget();
+      if (!target) return;
+      await uploadFileFromPath(filePath, target);
+    } catch (error) {
+      setLocalFileError(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  function uploadTarget(): UploadTarget | null {
+    if (!activeConversation) return null;
+    if (activeConversation.scope === "private") {
+      return { scope: "private", receiverUsername: activeConversation.peerUsername };
+    }
+    if (activeConversation.scope === "group" && activeConversation.groupID) {
+      return { scope: "group", groupID: activeConversation.groupID };
+    }
+    return { scope: "public" };
   }
 
   function submitMessage() {
@@ -96,13 +127,9 @@ export function Composer() {
         />
         <IconButton
           icon={Paperclip}
-          label={
-            isGroup
-              ? t(language, "chat.groupFilesUnsupported")
-              : t(language, "chat.attachFile")
-          }
-          disabled={!token || uploading || isGroup}
-          onClick={() => fileInputRef.current?.click()}
+          label={t(language, "chat.attachFile")}
+          disabled={!token || uploading}
+          onClick={() => void handleAttach()}
         />
         <textarea
           ref={textareaRef}

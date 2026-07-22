@@ -1,19 +1,18 @@
 import { X } from "lucide-react";
-import { useEffect, useState } from "react";
-import { createUnifiedAPI } from "../desktop";
+import { useEffect, useRef, useState } from "react";
+import {
+  createUnifiedAPI,
+  resolveAPIResourceURL,
+  runningInTauri,
+  selectDesktopFilePath,
+} from "../desktop";
 import { httpBaseURL } from "../config";
 import { t } from "../i18n";
 import { useChatStore } from "../store/chatStore";
 import { cli } from "./utils";
 import { IconButton } from "./ui/IconButton";
-
-type ProfileData = {
-  user: { userId: number; username: string; nickname: string; avatarUrl?: string; online?: boolean };
-  bio: string;
-  gender: number;
-  createdAt: string;
-  email?: string;
-};
+import { Avatar } from "./ui/Avatar";
+import type { ProfileData, ProfileImageKind } from "../protocol";
 
 export function UserProfileModal({
   username,
@@ -27,6 +26,9 @@ export function UserProfileModal({
   const language = useChatStore((state) => state.language);
   const token = useChatStore((state) => state.token);
   const currentUser = useChatStore((state) => state.currentUser);
+  const status = useChatStore((state) => state.status);
+  const onlineUsers = useChatStore((state) => state.onlineUsers);
+  const realtimeProfile = useChatStore((state) => state.profilesByUsername[username]);
   const [profile, setProfile] = useState<ProfileData | null>(null);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
@@ -37,12 +39,30 @@ export function UserProfileModal({
   const [bio, setBio] = useState("");
   const [email, setEmail] = useState("");
   const [gender, setGender] = useState(0);
+  const [uploadingImage, setUploadingImage] = useState<ProfileImageKind | null>(null);
+  const avatarInputRef = useRef<HTMLInputElement | null>(null);
+  const backgroundInputRef = useRef<HTMLInputElement | null>(null);
 
   const isOwn = currentUser?.username === username;
+  // 自己是否在线可以直接由本机实时连接判断；其他用户则优先使用实时在线列表。
+  // profile 接口中的 online 作为兜底，以兼容尚未收到在线列表的短暂阶段。
+  const isProfileOnline = isOwn
+    ? status === "connected" || profile?.user.online === true
+    : onlineUsers.some((user) => user.username === username && user.online) ||
+      profile?.user.online === true;
 
   useEffect(() => {
     cli(() => loadProfile())();
   }, [username]);
+
+  useEffect(() => {
+    if (realtimeProfile) {
+      setProfile((current) => ({
+        ...realtimeProfile,
+        ...(current?.email ? { email: current.email } : {}),
+      }));
+    }
+  }, [realtimeProfile]);
 
   async function loadProfile() {
     if (!token) return;
@@ -52,6 +72,12 @@ export function UserProfileModal({
       const api = createUnifiedAPI(httpBaseURL);
       const p = await api.getProfile(token, username);
       setProfile(p);
+      useChatStore.setState((state) => ({
+        profilesByUsername: {
+          ...state.profilesByUsername,
+          [username]: p,
+        },
+      }));
       setNickname(p.user.nickname);
       setBio(p.bio);
       setEmail(p.email ?? "");
@@ -95,6 +121,46 @@ export function UserProfileModal({
     }
   }
 
+  async function uploadProfileImage(kind: ProfileImageKind, file?: File) {
+    if (!token || !isOwn) return;
+    try {
+      setUploadingImage(kind);
+      setSaveError("");
+      const api = createUnifiedAPI(httpBaseURL);
+      let updated: ProfileData;
+      if (runningInTauri()) {
+        const filePath = await selectDesktopFilePath({ imagesOnly: true });
+        if (!filePath) return;
+        updated = await api.uploadProfileImageFromPath(token, username, kind, filePath);
+      } else {
+        if (!file) return;
+        updated = await api.uploadProfileImage(token, username, kind, file);
+      }
+      setProfile(updated);
+      useChatStore.setState((state) => ({
+        currentUser: state.currentUser
+          ? { ...state.currentUser, ...updated.user }
+          : null,
+        profilesByUsername: {
+          ...state.profilesByUsername,
+          [username]: updated,
+        },
+      }));
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : t(language, "profile.imageUploadError"));
+    } finally {
+      setUploadingImage(null);
+    }
+  }
+
+  function chooseProfileImage(kind: ProfileImageKind) {
+    if (runningInTauri()) {
+      void uploadProfileImage(kind);
+      return;
+    }
+    (kind === "avatar" ? avatarInputRef : backgroundInputRef).current?.click();
+  }
+
   const genderLabel = (g: number) =>
     g === 1 ? t(language, "profile.genderMale") : g === 2 ? t(language, "profile.genderFemale") : g === 3 ? t(language, "profile.genderOther") : "";
 
@@ -125,13 +191,51 @@ export function UserProfileModal({
           ) : profile ? (
             editing ? (
               <div className="form-block profile-form">
-                {profile.user.avatarUrl && (
-                  <img
-                    src={profile.user.avatarUrl}
-                    alt=""
-                    className="profile-avatar profile-avatar-small"
-                  />
-                )}
+                <Avatar user={profile.user} size="large" online={isProfileOnline} />
+                <input
+                  ref={avatarInputRef}
+                  className="visually-hidden"
+                  type="file"
+                  accept="image/jpeg,image/png"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    event.target.value = "";
+                    if (file) void uploadProfileImage("avatar", file);
+                  }}
+                />
+                <input
+                  ref={backgroundInputRef}
+                  className="visually-hidden"
+                  type="file"
+                  accept="image/jpeg,image/png"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    event.target.value = "";
+                    if (file) void uploadProfileImage("background", file);
+                  }}
+                />
+                <div className="profile-media-actions">
+                  <button
+                    type="button"
+                    className="secondary-button compact-button"
+                    disabled={uploadingImage !== null}
+                    onClick={() => chooseProfileImage("avatar")}
+                  >
+                    {uploadingImage === "avatar"
+                      ? t(language, "profile.uploadingImage")
+                      : t(language, "profile.changeAvatar")}
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary-button compact-button"
+                    disabled={uploadingImage !== null}
+                    onClick={() => chooseProfileImage("background")}
+                  >
+                    {uploadingImage === "background"
+                      ? t(language, "profile.uploadingImage")
+                      : t(language, "profile.changeBackground")}
+                  </button>
+                </div>
                 <label>
                   {t(language, "profile.nickname")}
                   <input
@@ -142,10 +246,11 @@ export function UserProfileModal({
                 </label>
                 <label>
                   {t(language, "profile.bio")}
-                  <input
+                  <textarea
                     value={bio}
                     onChange={(e) => setBio(e.target.value)}
                     disabled={saving}
+                    rows={4}
                   />
                 </label>
                 <label>
@@ -195,32 +300,35 @@ export function UserProfileModal({
               </div>
             ) : (
               <div className="profile-view">
-                <div className="profile-hero">
-                  {profile.user.avatarUrl && (
-                    <img
-                      src={profile.user.avatarUrl}
-                      alt=""
-                      className="profile-avatar"
-                    />
-                  )}
-                  <div className="profile-hero-copy">
-                    <div className="profile-hero-headline">
-                      <strong>{profile.user.nickname}</strong>
-                      <span
-                        className={`scope-badge ${
-                          profile.user.online ? "scope-badge-live" : ""
-                        }`}
-                      >
-                        {profile.user.online
-                          ? t(language, "chat.live")
-                          : t(language, "chat.offline")}
-                      </span>
+                <div className="profile-space">
+                  <div
+                    className="profile-cover"
+                    style={profile.backgroundUrl
+                      ? { backgroundImage: `url(${resolveAPIResourceURL(profile.backgroundUrl)})` }
+                      : undefined}
+                    aria-hidden="true"
+                  />
+                  <div className="profile-hero">
+                    <Avatar user={profile.user} size="large" online={isProfileOnline} />
+                    <div className="profile-hero-copy">
+                      <div className="profile-hero-headline">
+                        <strong>{profile.user.nickname}</strong>
+                        <span
+                          className={`scope-badge ${
+                            isProfileOnline ? "scope-badge-live" : ""
+                          }`}
+                        >
+                          {isProfileOnline
+                            ? t(language, "chat.live")
+                            : t(language, "chat.offline")}
+                        </span>
+                      </div>
+                      <span>@{profile.user.username}</span>
+                      <small>
+                        {t(language, "profile.joined")}{" "}
+                        {new Date(profile.createdAt).toLocaleDateString()}
+                      </small>
                     </div>
-                    <span>@{profile.user.username}</span>
-                    <small>
-                      {t(language, "profile.joined")}{" "}
-                      {new Date(profile.createdAt).toLocaleDateString()}
-                    </small>
                   </div>
                 </div>
                 <div className="profile-actions">
@@ -248,11 +356,12 @@ export function UserProfileModal({
                     <span>{genderLabel(profile.gender)}</span>
                   </div>
                 )}
-                {profile.bio && (
-                  <div className="profile-field">
-                    <p>{profile.bio}</p>
-                  </div>
-                )}
+                <div className="profile-field profile-bio">
+                  <span>{t(language, "profile.bio")}</span>
+                  <p className={!profile.bio ? "text-muted" : undefined}>
+                    {profile.bio || t(language, "profile.bioEmpty")}
+                  </p>
+                </div>
                 {isOwn && profile.email && (
                   <div className="profile-field">
                     <span className="text-muted">{t(language, "profile.email")}</span>
