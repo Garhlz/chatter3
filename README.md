@@ -13,8 +13,8 @@ chatter3/
 ├── docs/                # 协议文档与开发架构说明
 ├── server/              # 旧 Java 服务器（冻结）
 ├── client/              # 旧 Qt C++ 客户端（冻结）
-├── AGENT.MD             # 协作规范
-├── CLAUDE.md            # Claude Code 项目指南
+├── AGENTS.md            # 唯一协作规范与项目指南
+├── CLAUDE.md            # 指向 AGENTS.md 的兼容软链接
 └── TODO.md              # 项目总路线图
 ```
 
@@ -123,4 +123,4 @@ HTTP + JSON 做认证和数据查询，WebSocket + JSON 做实时事件推送。
 - PostgreSQL 通过 Docker Compose 本地启动
 - 远程开发时浏览器只访问 Vite 端口，`/api` 路径由 Vite proxy 转发到后端
 - Tauri 桌面构建需要 GTK3 / WebKit2GTK 等系统依赖；`npm run dev` + `npm run build` 可以在无图形环境的远程机器上完成
-- 提交规范见 [AGENT.MD](AGENT.MD)
+- 提交规范见 [AGENTS.md](AGENTS.md)
