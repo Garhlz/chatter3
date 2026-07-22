@@ -15,10 +15,10 @@ import (
 	"github.com/jackc/pgconn"
 	"github.com/jackc/pgx/v5"
 
-	"github.com/elaine/chatter2/backend-go/internal/auth"
-	protocolv2 "github.com/elaine/chatter2/backend-go/internal/protocol/v2"
-	"github.com/elaine/chatter2/backend-go/internal/repository/sqlcgen"
-	"github.com/elaine/chatter2/backend-go/internal/session"
+	"github.com/elaine/chatter3/backend-go/internal/auth"
+	protocolv2 "github.com/elaine/chatter3/backend-go/internal/protocol/v2"
+	"github.com/elaine/chatter3/backend-go/internal/repository/sqlcgen"
+	"github.com/elaine/chatter3/backend-go/internal/session"
 )
 
 var (

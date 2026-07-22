@@ -1,4 +1,4 @@
-use rusqlite::{Connection, params};
+use rusqlite::{params, Connection};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -46,8 +46,7 @@ pub fn open_or_create(app_data_dir: PathBuf) -> Result<Mutex<Connection>, String
         .map_err(|e| format!("failed to create app data directory: {e}"))?;
 
     let db_path = app_data_dir.join("chatter3.db");
-    let conn =
-        Connection::open(&db_path).map_err(|e| format!("failed to open database: {e}"))?;
+    let conn = Connection::open(&db_path).map_err(|e| format!("failed to open database: {e}"))?;
 
     conn.execute_batch("PRAGMA journal_mode=WAL;")
         .map_err(|e| format!("failed to set WAL mode: {e}"))?;
@@ -109,10 +108,22 @@ pub fn db_insert_message(
          client_request_id, error)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
         params![
-            msg.local_id, msg.conversation_id, msg.message_id, msg.scope,
-            msg.sender_id, msg.sender_username, msg.sender_nickname, msg.receiver_username, msg.group_id,
-            msg.content_type, msg.content, msg.file_json, msg.timestamp, msg.delivery_status,
-            msg.client_request_id, msg.error,
+            msg.local_id,
+            msg.conversation_id,
+            msg.message_id,
+            msg.scope,
+            msg.sender_id,
+            msg.sender_username,
+            msg.sender_nickname,
+            msg.receiver_username,
+            msg.group_id,
+            msg.content_type,
+            msg.content,
+            msg.file_json,
+            msg.timestamp,
+            msg.delivery_status,
+            msg.client_request_id,
+            msg.error,
         ],
     )
     .map_err(|e| format!("db insert message: {e}"))?;
@@ -184,9 +195,19 @@ pub fn db_confirm_message(
          client_request_id, error)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, 'sent', ?14, NULL)",
         params![
-            server_msg.local_id, server_msg.conversation_id, server_msg.message_id, server_msg.scope,
-            server_msg.sender_id, server_msg.sender_username, server_msg.sender_nickname, server_msg.receiver_username, server_msg.group_id,
-            server_msg.content_type, server_msg.content, server_msg.file_json, server_msg.timestamp,
+            server_msg.local_id,
+            server_msg.conversation_id,
+            server_msg.message_id,
+            server_msg.scope,
+            server_msg.sender_id,
+            server_msg.sender_username,
+            server_msg.sender_nickname,
+            server_msg.receiver_username,
+            server_msg.group_id,
+            server_msg.content_type,
+            server_msg.content,
+            server_msg.file_json,
+            server_msg.timestamp,
             server_msg.client_request_id,
         ],
     )
@@ -221,8 +242,15 @@ pub fn db_upsert_conversation(
          description, last_message, updated_at, unread_count)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
         params![
-            conv.id, conv.scope, conv.title, conv.peer_username, conv.group_id,
-            conv.description, conv.last_message, conv.updated_at, conv.unread_count,
+            conv.id,
+            conv.scope,
+            conv.title,
+            conv.peer_username,
+            conv.group_id,
+            conv.description,
+            conv.last_message,
+            conv.updated_at,
+            conv.unread_count,
         ],
     )
     .map_err(|e| format!("db upsert conversation: {e}"))?;

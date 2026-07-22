@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -14,7 +15,7 @@ import (
 	"sync"
 	"time"
 
-	protocolv2 "github.com/elaine/chatter2/backend-go/internal/protocol/v2"
+	protocolv2 "github.com/elaine/chatter3/backend-go/internal/protocol/v2"
 )
 
 const (
@@ -25,7 +26,14 @@ const (
 	wsOpcodePong         = 0xA
 
 	websocketGUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+
+	// 文本消息正文最多 4096 字符，但 JSON envelope 还包含事件名、requestId 等字段。
+	// 在分配 payload 缓冲区前设置一个明确上限，避免恶意客户端仅靠伪造长度
+	// 就让服务器尝试分配非常大的内存。
+	maxWebSocketPayloadSize = 64 * 1024
 )
+
+var errWebSocketPayloadTooLarge = errors.New("websocket payload is too large")
 
 type wsInboundEvent struct {
 	Event     string          `json:"event"`
@@ -133,6 +141,9 @@ func (c *wsConn) readFrame() (byte, []byte, error) {
 			return 0, nil, err
 		}
 		payloadLen = int64(binary.BigEndian.Uint64(extended))
+	}
+	if payloadLen > maxWebSocketPayloadSize {
+		return 0, nil, errWebSocketPayloadTooLarge
 	}
 
 	maskKey := make([]byte, 4)

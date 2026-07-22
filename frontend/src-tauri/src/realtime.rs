@@ -47,9 +47,7 @@ pub fn realtime_connect(
 }
 
 #[tauri::command]
-pub fn realtime_disconnect(
-    rt: tauri::State<'_, RealtimeHandle>,
-) -> Result<(), String> {
+pub fn realtime_disconnect(rt: tauri::State<'_, RealtimeHandle>) -> Result<(), String> {
     if let Some(cancel) = rt.cancel.lock().map_err(|e| format!("lock: {e}"))?.take() {
         let _ = cancel.send(true);
     }
@@ -64,8 +62,12 @@ pub fn realtime_send(
     payload: serde_json::Value,
     request_id: Option<String>,
 ) -> Result<bool, String> {
-    let msg = serde_json::to_string(&WsOutgoing { event, request_id, payload })
-        .map_err(|e| format!("json: {e}"))?;
+    let msg = serde_json::to_string(&WsOutgoing {
+        event,
+        request_id,
+        payload,
+    })
+    .map_err(|e| format!("json: {e}"))?;
     let tx = rt.send_tx.lock().map_err(|e| format!("lock: {e}"))?;
     match &*tx {
         Some(tx) => {
@@ -83,7 +85,10 @@ async fn realtime_loop(
     mut send_rx: mpsc::UnboundedReceiver<String>,
     mut cancel_rx: tokio::sync::watch::Receiver<bool>,
 ) {
-    let _ = app.emit("realtime://status", serde_json::json!({"status": "connecting"}));
+    let _ = app.emit(
+        "realtime://status",
+        serde_json::json!({"status": "connecting"}),
+    );
 
     let ws_url = format!("{ws_base_url}?token={token}");
     let max_reconnect: u32 = 6;
@@ -99,7 +104,10 @@ async fn realtime_loop(
         match tokio_tungstenite::connect_async(&ws_url).await {
             Ok((mut ws_stream, _)) => {
                 attempt = 0;
-                let _ = app.emit("realtime://status", serde_json::json!({"status": "connected"}));
+                let _ = app.emit(
+                    "realtime://status",
+                    serde_json::json!({"status": "connected"}),
+                );
 
                 let mut ping_interval = tokio::time::interval(tokio::time::Duration::from_secs(30));
 
@@ -130,9 +138,24 @@ async fn realtime_loop(
                                 Some(Ok(tokio_tungstenite::tungstenite::Message::Text(text))) => {
                                     let _ = app.emit("realtime://event", text.to_string());
                                 }
-                                Some(Ok(tokio_tungstenite::tungstenite::Message::Close(_))) => break,
-                                Some(Err(_)) => break,
-                                None => break,
+                                Some(Ok(tokio_tungstenite::tungstenite::Message::Close(frame))) => {
+                                    let _ = app.emit("realtime://error", serde_json::json!({
+                                        "message": format!("WebSocket closed by server: {frame:?}")
+                                    }));
+                                    break;
+                                }
+                                Some(Err(error)) => {
+                                    let _ = app.emit("realtime://error", serde_json::json!({
+                                        "message": format!("WebSocket stream failed: {error}")
+                                    }));
+                                    break;
+                                }
+                                None => {
+                                    let _ = app.emit("realtime://error", serde_json::json!({
+                                        "message": "WebSocket stream ended"
+                                    }));
+                                    break;
+                                }
                                 _ => {}
                             }
                         }
@@ -140,7 +163,10 @@ async fn realtime_loop(
                 }
             }
             Err(e) => {
-                let _ = app.emit("realtime://error", serde_json::json!({"message": format!("WebSocket connect failed: {e}")}));
+                let _ = app.emit(
+                    "realtime://error",
+                    serde_json::json!({"message": format!("WebSocket connect failed: {e}")}),
+                );
             }
         }
 
@@ -157,8 +183,14 @@ async fn realtime_loop(
         }
 
         let delay_ms = std::cmp::min(base_delay_ms * 2u64.pow(attempt - 1), 12_000);
-        let _ = app.emit("realtime://reconnect", serde_json::json!({"attempt": attempt, "delayMs": delay_ms}));
-        let _ = app.emit("realtime://status", serde_json::json!({"status": "connecting"}));
+        let _ = app.emit(
+            "realtime://reconnect",
+            serde_json::json!({"attempt": attempt, "delayMs": delay_ms}),
+        );
+        let _ = app.emit(
+            "realtime://status",
+            serde_json::json!({"status": "connecting"}),
+        );
 
         tokio::select! {
             _ = tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)) => {}

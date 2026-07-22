@@ -4,10 +4,9 @@ mod realtime;
 
 use reqwest::Url;
 use tauri::{
-    Emitter,
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Manager,
+    Emitter, Manager,
 };
 
 const CREDENTIAL_SERVICE: &str = "chatter3";
@@ -165,6 +164,8 @@ pub fn run() {
             api::api_update_user_profile,
             api::api_get_group_history,
             api::api_upload_file,
+            api::api_download_file_bytes,
+            api::api_save_file,
             realtime::realtime_connect,
             realtime::realtime_disconnect,
             realtime::realtime_send,
@@ -175,8 +176,8 @@ pub fn run() {
                 .path()
                 .app_data_dir()
                 .expect("app data directory must be available");
-            let db_conn = db::open_or_create(app_data_dir)
-                .expect("failed to initialize local chat database");
+            let db_conn =
+                db::open_or_create(app_data_dir).expect("failed to initialize local chat database");
             app.manage(db_conn);
 
             // System tray

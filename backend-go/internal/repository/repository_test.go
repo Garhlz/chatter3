@@ -11,7 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/elaine/chatter2/backend-go/internal/repository/sqlcgen"
+	"github.com/elaine/chatter3/backend-go/internal/repository/sqlcgen"
 )
 
 // TestSqlcQueriesIntegration directly tests the sqlc-generated query functions.
@@ -36,7 +36,7 @@ func TestSqlcQueriesIntegration(t *testing.T) {
 
 	t.Run("CreateUser", func(t *testing.T) {
 		userID, err := q.CreateUser(ctx, sqlcgen.CreateUserParams{
-			Username: "repo_usr_"+suffix, Password: "hash", Nickname: "Test",
+			Username: "repo_usr_" + suffix, Password: "hash", Nickname: "Test",
 		})
 		if err != nil {
 			t.Fatalf("create user: %v", err)
@@ -72,7 +72,7 @@ func TestSqlcQueriesIntegration(t *testing.T) {
 
 	t.Run("InsertPublicMessage", func(t *testing.T) {
 		userID, _ := q.CreateUser(ctx, sqlcgen.CreateUserParams{
-			Username: "repo_pub_"+suffix, Password: "hash", Nickname: "Pub",
+			Username: "repo_pub_" + suffix, Password: "hash", Nickname: "Pub",
 		})
 		t.Cleanup(func() {
 			_, _ = pool.Exec(context.Background(), `DELETE FROM messages WHERE sender_id = $1`, userID)
@@ -92,7 +92,7 @@ func TestSqlcQueriesIntegration(t *testing.T) {
 
 	t.Run("CreateGroup", func(t *testing.T) {
 		userID, _ := q.CreateUser(ctx, sqlcgen.CreateUserParams{
-			Username: "repo_grp_"+suffix, Password: "hash", Nickname: "Grp",
+			Username: "repo_grp_" + suffix, Password: "hash", Nickname: "Grp",
 		})
 		t.Cleanup(func() {
 			_, _ = pool.Exec(context.Background(), `DELETE FROM group_members WHERE user_id = $1`, userID)

@@ -43,7 +43,7 @@ type UserProfile struct {
 // OwnProfile adds private fields visible only to the profile owner.
 type OwnProfile struct {
 	UserProfile
-	Email string `json:"email"`
+	Email string `json:"email,omitempty"`
 }
 
 // UpdateProfileRequest is the body for PUT /api/v2/users/{username}/profile.
@@ -140,6 +140,15 @@ type Group struct {
 	Creator     User   `json:"creator"`
 	MemberCount int    `json:"memberCount"`
 	CreatedAt   string `json:"createdAt"`
+}
+
+// GroupChangedPayload notifies connected clients that group navigation data changed.
+//
+// Text messages still use chat.group.message. This event only asks the UI to update
+// group metadata or remove a conversation when the current user was removed.
+type GroupChangedPayload struct {
+	Group           Group  `json:"group"`
+	RemovedUsername string `json:"removedUsername,omitempty"`
 }
 
 // GroupMember is a user with their role within a group.

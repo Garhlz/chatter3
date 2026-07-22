@@ -30,13 +30,13 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/elaine/chatter2/backend-go/internal/auth"
-	"github.com/elaine/chatter2/backend-go/internal/config"
-	protocolv2 "github.com/elaine/chatter2/backend-go/internal/protocol/v2"
-	"github.com/elaine/chatter2/backend-go/internal/repository"
-	"github.com/elaine/chatter2/backend-go/internal/repository/sqlcgen"
-	appsvc "github.com/elaine/chatter2/backend-go/internal/service"
-	"github.com/elaine/chatter2/backend-go/internal/session"
+	"github.com/elaine/chatter3/backend-go/internal/auth"
+	"github.com/elaine/chatter3/backend-go/internal/config"
+	protocolv2 "github.com/elaine/chatter3/backend-go/internal/protocol/v2"
+	"github.com/elaine/chatter3/backend-go/internal/repository"
+	"github.com/elaine/chatter3/backend-go/internal/repository/sqlcgen"
+	appsvc "github.com/elaine/chatter3/backend-go/internal/service"
+	"github.com/elaine/chatter3/backend-go/internal/session"
 )
 
 // contextKey is a private type for context values to avoid collisions.
@@ -448,8 +448,13 @@ func (s *Server) handleV2WebSocket(w http.ResponseWriter, r *http.Request) {
 		// 先把会话从 manager 移除，再关闭 send channel。
 		// 否则其他 goroutine 仍可能通过 manager 找到这个 session，
 		// 向已关闭的 channel 发送数据并触发 panic。
-		s.sessions.RemoveSession(sess)
+		removedCurrentSession := s.sessions.RemoveSession(sess)
 		sess.Shutdown()
+		if !removedCurrentSession {
+			// 同一用户重连时，新 session 已经替换旧 session。
+			// 此时旧连接退出不代表用户离线，不能广播 presence.offline。
+			return
+		}
 		s.sessions.Broadcast(eventJSON("presence.offline", "", protocolv2.PresencePayload{
 			User: protocolv2.User{
 				UserID:   sess.UserID,
@@ -489,6 +494,13 @@ func (s *Server) handleV2WebSocket(w http.ResponseWriter, r *http.Request) {
 		_ = ws.setReadDeadline(time.Now().Add(s.cfg.HeartbeatTimeout))
 		opcode, payload, err := ws.readFrame()
 		if err != nil {
+			if errors.Is(err, errWebSocketPayloadTooLarge) {
+				_ = ws.writeFrame(wsOpcodeText, errorEventJSON(
+					"payload_too_large",
+					"websocket payload is too large",
+					"",
+				))
+			}
 			if !errors.Is(err, io.EOF) {
 				slog.Debug("websocket read ended", "user", sess.Username, "err", err)
 			}
@@ -727,6 +739,13 @@ func (s *Server) handleV2CreateGroup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// HTTP 返回值让创建者立即得到结果；WebSocket 事件则通知其他在线成员，
+	// 避免他们必须手动刷新群列表才能看到刚加入的群。
+	targets := uniqueUsernames(append([]string{identity.Username}, req.Members...)...)
+	s.sessions.SendToUsers(eventJSON("group.changed", "", protocolv2.GroupChangedPayload{
+		Group: *group,
+	}), targets)
+
 	writeJSON(w, http.StatusCreated, protocolv2.APIResponse[protocolv2.CreateGroupResponse]{
 		Data: protocolv2.CreateGroupResponse{Group: *group},
 	})
@@ -827,6 +846,20 @@ func (s *Server) handleV2AddGroupMembers(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// 成员列表接口返回完整成员集合，可以直接用它确定推送目标。
+	// 拉取群资料失败不应回滚已经成功的加人操作，因此这里只记录日志。
+	if group, groupErr := s.groupSvc.GetGroupByIDForUser(r.Context(), claims.UserID, groupID); groupErr == nil {
+		targets := make([]string, 0, len(members))
+		for _, member := range members {
+			targets = append(targets, member.User.Username)
+		}
+		s.sessions.SendToUsers(eventJSON("group.changed", "", protocolv2.GroupChangedPayload{
+			Group: *group,
+		}), targets)
+	} else {
+		slog.Warn("group members changed but realtime metadata refresh failed", "groupID", groupID, "err", groupErr)
+	}
+
 	writeJSON(w, http.StatusOK, protocolv2.APIResponse[[]protocolv2.GroupMember]{Data: members})
 }
 
@@ -839,6 +872,10 @@ func (s *Server) handleV2RemoveGroupMember(w http.ResponseWriter, r *http.Reques
 	}
 
 	targetUsername := r.PathValue("username")
+	// 删除前保留群资料和旧成员列表。删除后目标用户已经无权再查询该群，
+	// 但我们仍需要通知他从侧栏移除会话。
+	groupBeforeRemoval, _ := s.groupSvc.GetGroupByIDForUser(r.Context(), claims.UserID, groupID)
+	membersBeforeRemoval, _ := s.groupSvc.GetGroupMembersForUser(r.Context(), claims.UserID, groupID)
 	if err := s.groupSvc.RemoveMember(r.Context(), claims.UserID, groupID, targetUsername); err != nil {
 		switch {
 		case errors.Is(err, repository.ErrNotFound):
@@ -858,6 +895,20 @@ func (s *Server) handleV2RemoveGroupMember(w http.ResponseWriter, r *http.Reques
 			writeError(w, http.StatusInternalServerError, "internal_error", "failed to remove member")
 			return
 		}
+	}
+
+	if groupBeforeRemoval != nil {
+		if groupBeforeRemoval.MemberCount > 0 {
+			groupBeforeRemoval.MemberCount--
+		}
+		targets := make([]string, 0, len(membersBeforeRemoval))
+		for _, member := range membersBeforeRemoval {
+			targets = append(targets, member.User.Username)
+		}
+		s.sessions.SendToUsers(eventJSON("group.changed", "", protocolv2.GroupChangedPayload{
+			Group:           *groupBeforeRemoval,
+			RemovedUsername: targetUsername,
+		}), targets)
 	}
 
 	w.WriteHeader(http.StatusNoContent)
@@ -905,6 +956,26 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 	if err := json.NewEncoder(w).Encode(body); err != nil {
 		slog.Error("HTTP JSON 响应写入失败", "err", err)
 	}
+}
+
+// uniqueUsernames normalizes user input before it is used as an in-memory session key.
+// The group service already trims database input; doing the same for realtime targets
+// prevents an input such as " bob " from being stored correctly but notified incorrectly.
+func uniqueUsernames(values ...string) []string {
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		username := strings.TrimSpace(value)
+		if username == "" {
+			continue
+		}
+		if _, exists := seen[username]; exists {
+			continue
+		}
+		seen[username] = struct{}{}
+		result = append(result, username)
+	}
+	return result
 }
 
 func writeError(w http.ResponseWriter, status int, code, message string) {

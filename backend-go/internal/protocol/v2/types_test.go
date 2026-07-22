@@ -91,6 +91,30 @@ func TestGroupJSONShape(t *testing.T) {
 	}
 }
 
+func TestGroupChangedPayloadJSONShape(t *testing.T) {
+	payload := GroupChangedPayload{
+		Group: Group{GroupID: 7, GroupName: "study", MemberCount: 2},
+		RemovedUsername: "bob",
+	}
+
+	b, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal group changed payload: %v", err)
+	}
+
+	var got map[string]any
+	if err := json.Unmarshal(b, &got); err != nil {
+		t.Fatalf("unmarshal group changed payload: %v", err)
+	}
+	if got["removedUsername"] != "bob" {
+		t.Fatalf("expected removedUsername bob, got %v", got["removedUsername"])
+	}
+	group, ok := got["group"].(map[string]any)
+	if !ok || group["groupID"] != float64(7) {
+		t.Fatalf("unexpected group payload: %v", got["group"])
+	}
+}
+
 func TestGroupMemberJSONShape(t *testing.T) {
 	gm := GroupMember{
 		User: User{

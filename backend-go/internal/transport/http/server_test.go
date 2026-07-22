@@ -21,13 +21,13 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/elaine/chatter2/backend-go/internal/auth"
-	"github.com/elaine/chatter2/backend-go/internal/config"
-	protocolv2 "github.com/elaine/chatter2/backend-go/internal/protocol/v2"
-	"github.com/elaine/chatter2/backend-go/internal/repository"
-	"github.com/elaine/chatter2/backend-go/internal/repository/sqlcgen"
-	appsvc "github.com/elaine/chatter2/backend-go/internal/service"
-	"github.com/elaine/chatter2/backend-go/internal/session"
+	"github.com/elaine/chatter3/backend-go/internal/auth"
+	"github.com/elaine/chatter3/backend-go/internal/config"
+	protocolv2 "github.com/elaine/chatter3/backend-go/internal/protocol/v2"
+	"github.com/elaine/chatter3/backend-go/internal/repository"
+	"github.com/elaine/chatter3/backend-go/internal/repository/sqlcgen"
+	appsvc "github.com/elaine/chatter3/backend-go/internal/service"
+	"github.com/elaine/chatter3/backend-go/internal/session"
 )
 
 func TestHandleV2OnlineUsersReturnsSortedUsers(t *testing.T) {

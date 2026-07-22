@@ -8,10 +8,10 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	protocolv2 "github.com/elaine/chatter2/backend-go/internal/protocol/v2"
-	"github.com/elaine/chatter2/backend-go/internal/repository"
-	"github.com/elaine/chatter2/backend-go/internal/repository/sqlcgen"
-	"github.com/elaine/chatter2/backend-go/internal/session"
+	protocolv2 "github.com/elaine/chatter3/backend-go/internal/protocol/v2"
+	"github.com/elaine/chatter3/backend-go/internal/repository"
+	"github.com/elaine/chatter3/backend-go/internal/repository/sqlcgen"
+	"github.com/elaine/chatter3/backend-go/internal/session"
 )
 
 const MaxTextContentLength = 4096

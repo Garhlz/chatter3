@@ -5,8 +5,8 @@ import (
 	"strconv"
 	"strings"
 
-	protocolv2 "github.com/elaine/chatter2/backend-go/internal/protocol/v2"
-	"github.com/elaine/chatter2/backend-go/internal/repository/sqlcgen"
+	protocolv2 "github.com/elaine/chatter3/backend-go/internal/protocol/v2"
+	"github.com/elaine/chatter3/backend-go/internal/repository/sqlcgen"
 )
 
 func normalizeTextContent(content string) (string, error) {

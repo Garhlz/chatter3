@@ -24,6 +24,7 @@
 
 - HTTP 认证：`POST /api/v2/auth/register`、`POST /api/v2/auth/login`
 - HTTP 历史与在线列表：`GET /api/v2/users/online`、公共历史、私聊历史
+- HTTP 用户资料：读取任意用户公开资料、更新本人资料
 - WebSocket 鉴权：`GET /api/v2/ws?token=<token>`
 - WebSocket 会话事件：`session.ready`、`session.ping`、`session.pong`
 - WebSocket 在线事件：`presence.online`、`presence.offline`
@@ -151,6 +152,43 @@
 
 返回当前在线用户列表。
 
+#### `GET /api/v2/users/{username}/profile`
+
+返回用户公开资料。查询本人时，响应额外包含仅本人可见的 `email`。
+
+```json
+{
+  "data": {
+    "user": {
+    "userId": 1,
+    "username": "alice",
+    "nickname": "Alice",
+    "avatarUrl": "https://example.com/avatar.png",
+    "online": true
+    },
+    "bio": "Hello",
+    "gender": 0,
+    "createdAt": "2026-05-15T12:00:00Z",
+    "email": "alice@example.com"
+  }
+}
+```
+
+#### `PUT /api/v2/users/{username}/profile`
+
+只允许更新当前登录用户自己的资料。请求字段均可选；未提供的字段保持不变。
+
+```json
+{
+  "nickname": "Alice",
+  "bio": "Hello",
+  "email": "alice@example.com",
+  "gender": 0
+}
+```
+
+成功响应与读取本人资料相同。更新其他用户返回 `forbidden`。
+
 #### `GET /api/v2/chats/public/history?limit=50&cursor=...`
 
 返回公共聊天历史。
@@ -261,9 +299,24 @@
 }
 ```
 
+成功后返回本次加入的成员结构数组：
+
+```json
+{
+  "data": [
+    {
+      "user": { "userId": 3, "username": "carol", "nickname": "Carol", "online": false },
+      "role": 0,
+      "joinedAt": "2026-05-15T12:00:00Z"
+    }
+  ]
+}
+```
+
 #### `DELETE /api/v2/groups/{groupID}/members/{username}`
 
 移除成员。调用者可以移除自己，群主或管理员可以移除其他人。不能移除群主。
+成功时返回 `204 No Content`。
 
 #### `GET /api/v2/groups/{groupID}/history?limit=50&cursor=...`
 
@@ -417,6 +470,37 @@
 - 群消息广播给所有在线群成员（含发送者）
 - 离线成员可通过历史接口拉取
 
+#### 群资料变化事件
+
+创建群聊、添加成员或移除成员成功后，服务端向相关在线成员推送：
+
+```json
+{
+  "event": "group.changed",
+  "timestamp": "2026-07-22T12:00:00Z",
+  "payload": {
+    "group": {
+      "groupID": 1,
+      "groupName": "My Group",
+      "creator": {
+        "userId": 1,
+        "username": "alice",
+        "nickname": "Alice",
+        "online": true
+      },
+      "memberCount": 2,
+      "createdAt": "2026-07-22T11:55:00Z"
+    },
+    "removedUsername": "bob"
+  }
+}
+```
+
+- 新建群聊和添加成员时省略 `removedUsername`，客户端新增或更新会话。
+- 移除成员时带上 `removedUsername`。被移除者删除本地会话，其他成员更新人数。
+- 该事件只同步导航所需的群资料；聊天内容仍使用 `chat.group.message`。
+- 事件只保证在线实时送达。客户端重连后仍以 `GET /api/v2/groups` 为最终状态来源。
+
 #### 用户上线/下线事件
 
 - `presence.online`
@@ -459,6 +543,8 @@
 - 私聊 `receiverUsername` 不能为空
 - 不允许给自己发送私聊
 - 私聊目标用户不存在时，HTTP 和 WebSocket 都返回 `not_found`
+- 单个 WebSocket frame 的 payload 上限为 64 KiB；超过上限返回
+  `payload_too_large` 后关闭当前连接
 
 当前文件消息约束：
 
@@ -476,9 +562,12 @@
   "userId": 1,
   "username": "alice",
   "nickname": "Alice",
+  "avatarUrl": "https://example.com/avatar.png",
   "online": true
 }
 ```
+
+`avatarUrl` 为可选字段；没有头像地址时服务端可以省略它。
 
 ### 4.2 Message
 

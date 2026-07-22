@@ -8,10 +8,10 @@ import (
 	"sync"
 	"syscall"
 
-	"github.com/elaine/chatter2/backend-go/internal/config"
-	"github.com/elaine/chatter2/backend-go/internal/session"
-	"github.com/elaine/chatter2/backend-go/internal/storage"
-	httptransport "github.com/elaine/chatter2/backend-go/internal/transport/http"
+	"github.com/elaine/chatter3/backend-go/internal/config"
+	"github.com/elaine/chatter3/backend-go/internal/session"
+	"github.com/elaine/chatter3/backend-go/internal/storage"
+	httptransport "github.com/elaine/chatter3/backend-go/internal/transport/http"
 )
 
 func main() {

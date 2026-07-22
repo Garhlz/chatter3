@@ -90,16 +90,19 @@ func (m *Manager) Remove(username string) {
 //
 // 这样可以避免“同一用户新连接顶掉旧连接”时，旧连接退出又把新会话误删掉。
 // 对 WebSocket 这类长连接来说，这个保护很重要，否则重连会把在线状态弄乱。
-func (m *Manager) RemoveSession(target *Session) {
+// 返回值表示目标 session 是否真的被移除。transport 层只有在返回 true 时
+// 才应该广播 offline；如果旧连接已被新连接替换，该用户实际上仍然在线。
+func (m *Manager) RemoveSession(target *Session) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	current, ok := m.byUser[target.Username]
 	if !ok || current != target {
-		return
+		return false
 	}
 	delete(m.byUser, target.Username)
 	delete(m.byUserID, target.UserID)
+	return true
 }
 
 // Get 通过 username 查找会话，未登录返回 nil。

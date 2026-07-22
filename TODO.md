@@ -13,7 +13,7 @@ Active execution queues live here:
 
 - Current stack: Go backend + Tauri/React/Vite desktop client.
 - Legacy `client/` and `server/` are frozen as historical reference.
-- Stable contract: auth, history, online users, WebSocket session, public/private/group text messages, file upload/download, and file message events.
+- Stable contract: auth, history, online users, WebSocket session, public/private/group text messages, file upload/download, file message events, and realtime `group.changed` navigation updates.
 - Unstable or missing contract: group file upload, group deletion, read receipts, recall, and multi-device sync.
 
 ## Shared TODO
@@ -21,7 +21,7 @@ Active execution queues live here:
 - [ ] Add frontend/backend protocol-v2 integration samples.
 - [ ] Decide whether advanced group features should stay in protocol-v2 or move to v2.1/v3.
 - [ ] Define read receipt, recall, and multi-device sync protocol boundaries before either side implements UI or backend storage.
-- [ ] Decide whether Tauri should eventually own HTTP/WebSocket connection lifecycle, or whether the current Web-layer realtime client remains the long-term owner.
+- [x] Use the Tauri Rust HTTP/WebSocket client in desktop mode while keeping browser clients as the Vite development fallback.
 
 ## Historical Notes
 

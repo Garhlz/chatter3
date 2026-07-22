@@ -1,4 +1,4 @@
-module github.com/elaine/chatter2/backend-go
+module github.com/elaine/chatter3/backend-go
 
 go 1.25.0
 

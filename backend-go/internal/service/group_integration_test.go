@@ -8,11 +8,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/elaine/chatter2/backend-go/internal/repository"
+	"github.com/elaine/chatter3/backend-go/internal/repository"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/elaine/chatter2/backend-go/internal/repository/sqlcgen"
-	"github.com/elaine/chatter2/backend-go/internal/session"
+	"github.com/elaine/chatter3/backend-go/internal/repository/sqlcgen"
+	"github.com/elaine/chatter3/backend-go/internal/session"
 )
 
 func TestGroupServiceIntegrationCreateSendHistory(t *testing.T) {

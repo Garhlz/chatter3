@@ -51,10 +51,31 @@ func TestRemoveSessionDoesNotRemoveReplacement(t *testing.T) {
 
 	manager.Register(first)
 	manager.Register(second)
-	manager.RemoveSession(first)
+	removed := manager.RemoveSession(first)
 
+	if removed {
+		t.Fatalf("expected replaced session not to be removed")
+	}
 	if got := manager.Get("alice"); got != second {
 		t.Fatalf("expected replacement session to remain registered, got %#v", got)
+	}
+}
+
+func TestRemoveSessionReportsCurrentSessionRemoval(t *testing.T) {
+	manager := NewManager()
+	current := &Session{
+		UserID:   1,
+		Username: "alice",
+		Send:     make(chan []byte, 1),
+	}
+
+	manager.Register(current)
+
+	if removed := manager.RemoveSession(current); !removed {
+		t.Fatalf("expected current session to be removed")
+	}
+	if got := manager.Get("alice"); got != nil {
+		t.Fatalf("expected no session after removal, got %#v", got)
 	}
 }
 

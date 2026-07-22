@@ -30,6 +30,7 @@
 - [x] `DELETE /api/v2/groups/{groupID}/members/{username}` 移除成员
 - [x] `GET /api/v2/groups/{groupID}/history` 群聊历史
 - [x] `chat.group.send -> chat.group.message` 群聊实时消息
+- [x] `group.changed` 实时同步建群、加人和移除成员后的群导航状态
 - [x] 群详情 / 成员列表 / 群历史统一成员可见性约束
 - [x] 建群与批量加人成员写入具备事务回滚语义
 - [x] `internal/auth` 单元测试（5 个用例）
@@ -87,6 +88,7 @@
 - `GET /api/v2/files/{fileId}`
 - 群组 CRUD、成员管理与群聊历史
 - `chat.group.send -> chat.group.message`
+- `group.changed` 群导航资料变化事件
 - `forbidden` 错误码（非成员访问、权限不足）
 - 未知私聊对象、未知私聊文件接收者统一返回 `not_found`
 - 附件历史/下载链路允许 `file_type` 为空并返回空字符串

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/elaine/chatter2/backend-go/internal/repository/sqlcgen"
+	"github.com/elaine/chatter3/backend-go/internal/repository/sqlcgen"
 )
 
 func TestNormalizeTextContent(t *testing.T) {
